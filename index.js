@@ -5,6 +5,7 @@ require("dotenv").config();
 const line = require("@line/bot-sdk");
 const OpenAI = require("openai");
 const moment = require("moment-timezone");
+require("moment/locale/th");
 
 // ================= LINE CONFIG =================
 const config = {
@@ -39,7 +40,6 @@ async function handleEvent(event) {
   const userText = event.message.text.trim();
   const lowerText = userText.toLowerCase();
 
-  // ---------- Validate ----------
   if (!userText) {
     return reply(event, "พิมพ์ข้อความมาก่อนนะครับ 😊");
   }
@@ -48,29 +48,33 @@ async function handleEvent(event) {
     return reply(event, "ข้อความยาวเกินไปครับ ขอไม่เกิน 500 ตัวอักษร 🙏");
   }
 
-  // ---------- Time / Date (ไม่ใช้ AI) ----------
-  const now = moment().tz("Asia/Bangkok");
+  // ---------- TIME / DATE (ไม่ใช้ AI) ----------
+  const now = moment().tz("Asia/Bangkok").locale("th");
 
-  if (lowerText.includes("กี่โมง")) {
-    return reply(event, `ตอนนี้เวลา ${now.format("HH:mm")} น. ครับ`);
+  const buddhistYear2Digit = (now.year() + 543) % 100;
+
+  if (lowerText.includes("กี่โมง") || lowerText.includes("เวลา")) {
+    return reply(event, `⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับ`);
   }
 
   if (lowerText.includes("วันนี้")) {
     return reply(
       event,
-      `วันนี้คือวัน${now.format("dddd ที่ D MMMM YYYY", "th")}`
+      `📅 วันนี้คือวัน${now.format("dddd ที่ D MMMM")} ${buddhistYear2Digit}`
     );
   }
 
   if (lowerText.includes("พรุ่งนี้")) {
     const tomorrow = now.clone().add(1, "day");
+    const tomorrowYear = (tomorrow.year() + 543) % 100;
+
     return reply(
       event,
-      `พรุ่งนี้คือวัน${tomorrow.format("dddd ที่ D MMMM YYYY", "th")}`
+      `📅 พรุ่งนี้คือวัน${tomorrow.format("dddd ที่ D MMMM")} ${tomorrowYear}`
     );
   }
 
-  // ---------- Greeting ----------
+  // ---------- GREETING ----------
   if (lowerText.includes("สวัสดี") || lowerText.includes("hello")) {
     return client.replyMessage(event.replyToken, [
       { type: "text", text: "ยินดีที่ได้รู้จักครับ ผมชื่อ บอทไลน์ 😊" },
