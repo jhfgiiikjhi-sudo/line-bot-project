@@ -4,29 +4,33 @@ require("dotenv").config();
 
 const line = require("@line/bot-sdk");
 const OpenAI = require("openai");
+const moment = require("moment-timezone");
 
-// LINE Config
+// ================= LINE CONFIG =================
 const config = {
   channelAccessToken: process.env.token,
   channelSecret: process.env.secretcode,
 };
 
-// OpenAI Client
+const client = new line.Client(config);
+
+// ================= OpenAI =================
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
-app.post("/webhook", line.middleware(config), (req, res) => {
-  Promise.all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      console.error("error handling events", err);
-      res.status(500).send("error");
-    });
+// ================= WEBHOOK =================
+app.post("/webhook", line.middleware(config), async (req, res) => {
+  try {
+    const results = await Promise.all(req.body.events.map(handleEvent));
+    res.json(results);
+  } catch (err) {
+    console.error("Webhook Error:", err);
+    res.status(500).end();
+  }
 });
 
-const client = new line.Client(config);
-
+// ================= MAIN LOGIC =================
 async function handleEvent(event) {
   if (event.type !== "message" || event.message.type !== "text") {
     return null;
@@ -35,20 +39,38 @@ async function handleEvent(event) {
   const userText = event.message.text.trim();
   const lowerText = userText.toLowerCase();
 
+  // ---------- Validate ----------
   if (!userText) {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "พิมพ์ข้อความมาก่อนนะครับ 😊",
-    });
+    return reply(event, "พิมพ์ข้อความมาก่อนนะครับ 😊");
   }
 
   if (userText.length > 500) {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "ข้อความยาวเกินไปครับ ขอไม่เกิน 500 ตัวอักษร 🙏",
-    });
+    return reply(event, "ข้อความยาวเกินไปครับ ขอไม่เกิน 500 ตัวอักษร 🙏");
   }
 
+  // ---------- Time / Date (ไม่ใช้ AI) ----------
+  const now = moment().tz("Asia/Bangkok");
+
+  if (lowerText.includes("กี่โมง")) {
+    return reply(event, `ตอนนี้เวลา ${now.format("HH:mm")} น. ครับ`);
+  }
+
+  if (lowerText.includes("วันนี้")) {
+    return reply(
+      event,
+      `วันนี้คือวัน${now.format("dddd ที่ D MMMM YYYY", "th")}`
+    );
+  }
+
+  if (lowerText.includes("พรุ่งนี้")) {
+    const tomorrow = now.clone().add(1, "day");
+    return reply(
+      event,
+      `พรุ่งนี้คือวัน${tomorrow.format("dddd ที่ D MMMM YYYY", "th")}`
+    );
+  }
+
+  // ---------- Greeting ----------
   if (lowerText.includes("สวัสดี") || lowerText.includes("hello")) {
     return client.replyMessage(event.replyToken, [
       { type: "text", text: "ยินดีที่ได้รู้จักครับ ผมชื่อ บอทไลน์ 😊" },
@@ -57,33 +79,43 @@ async function handleEvent(event) {
     ]);
   }
 
+  // ---------- AI RESPONSE ----------
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "คุณคือแชทบอทที่สุภาพ ตอบเป็นภาษาไทย" },
+        {
+          role: "system",
+          content:
+            "คุณคือแชทบอทที่สุภาพ เป็นกันเอง และตอบเป็นภาษาไทยอย่างเข้าใจง่าย",
+        },
         { role: "user", content: userText },
       ],
+      max_tokens: 300,
     });
 
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: completion.choices[0].message.content,
-    });
+    const aiReply = completion.choices[0].message.content;
+    return reply(event, aiReply);
 
   } catch (error) {
     console.error("AI Error:", error);
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "ขออภัยครับ ระบบ AI มีปัญหาชั่วคราว 😢",
-    });
+    return reply(event, "ขออภัยครับ ระบบ AI มีปัญหาชั่วคราว 😢");
   }
 }
 
+// ================= HELPER =================
+function reply(event, text) {
+  return client.replyMessage(event.replyToken, {
+    type: "text",
+    text,
+  });
+}
 
-// test route
+// ================= TEST =================
 app.get("/", (req, res) => {
   res.send("ok");
 });
 
-app.listen(8080, () => console.log("Server running on port 8080"));
+app.listen(8080, () =>
+  console.log("🚀 Server running on port 8080")
+);
