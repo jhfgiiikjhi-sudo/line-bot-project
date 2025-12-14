@@ -8,14 +8,21 @@ const OpenAI = require("openai");
 const moment = require("moment-timezone");
 require("moment/locale/th");
 
-// ================= LOAD USER MEMORY =================
+// ================= USER MEMORY =================
 const USERS_FILE = "./users.json";
 let users = {};
 
+// โหลดข้อมูลผู้ใช้
 if (fs.existsSync(USERS_FILE)) {
-  users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  try {
+    users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  } catch (err) {
+    console.error("Error reading users.json:", err);
+    users = {};
+  }
 }
 
+// บันทึกข้อมูลผู้ใช้
 function saveUsers() {
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
@@ -54,8 +61,12 @@ async function handleEvent(event) {
   const userText = event.message.text.trim();
   const lowerText = userText.toLowerCase();
 
+  // ---------- CREATE USER ----------
   if (!users[userId]) {
-    users[userId] = { step: "intro" };
+    users[userId] = {
+      step: "ask_name",
+      createdAt: new Date().toISOString(),
+    };
     saveUsers();
 
     return reply(
@@ -66,21 +77,24 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
-  // ---------- STEP: NAME ----------
-  if (user.step === "intro") {
+  // ---------- STEP: ASK NAME ----------
+  if (user.step === "ask_name") {
     user.name = userText;
     user.step = "ask_age";
     saveUsers();
 
-    return reply(event, `ยินดีที่ได้รู้จักครับ ${user.name} 😊\nคุณอายุเท่าไหร่ครับ?`);
+    return reply(
+      event,
+      `ยินดีที่ได้รู้จักครับ ${user.name} 😊\nคุณอายุเท่าไหร่ครับ?`
+    );
   }
 
-  // ---------- STEP: AGE ----------
+  // ---------- STEP: ASK AGE ----------
   if (user.step === "ask_age") {
     const age = parseInt(userText);
 
-    if (isNaN(age)) {
-      return reply(event, "กรุณาพิมพ์อายุเป็นตัวเลขนะครับ 😊");
+    if (isNaN(age) || age <= 0 || age > 120) {
+      return reply(event, "กรุณาพิมพ์อายุเป็นตัวเลขที่ถูกต้องนะครับ 😊");
     }
 
     user.age = age;
@@ -89,12 +103,21 @@ async function handleEvent(event) {
 
     return reply(
       event,
-      "วันเกิดของคุณวันที่เท่าไหร่หรอครับ?\n(ตัวอย่าง: 10/02/2547)"
+      "วันเกิดของคุณวันที่เท่าไหร่หรอครับ?\n(ตัวอย่าง: 20/11/2548)"
     );
   }
 
-  // ---------- STEP: BIRTHDAY ----------
+  // ---------- STEP: ASK BIRTHDAY ----------
   if (user.step === "ask_birthday") {
+    const birthdayRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+
+    if (!birthdayRegex.test(userText)) {
+      return reply(
+        event,
+        "รูปแบบวันเกิดไม่ถูกต้องนะครับ 😊\nกรุณาพิมพ์แบบนี้: 20/11/2548"
+      );
+    }
+
     user.birthday = userText;
     user.step = "done";
     saveUsers();
@@ -105,30 +128,36 @@ async function handleEvent(event) {
     );
   }
 
-  // ---------- TIME / DATE ----------
+  // ================= COMMANDS (ไม่ใช้ AI) =================
   const now = moment().tz("Asia/Bangkok").locale("th");
-  const buddhistYear2Digit = (now.year() + 543) % 100;
+  const buddhistYear = (now.year() + 543).toString().slice(-2);
 
-  if (lowerText.includes("กี่โมง")) {
+  if (lowerText.includes("กี่โมง") || lowerText.includes("เวลา")) {
     return reply(event, `⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับ`);
   }
 
   if (lowerText.includes("วันนี้")) {
     return reply(
       event,
-      `📅 วันนี้คือวัน${now.format("dddd ที่ D MMMM")} ${buddhistYear2Digit}`
+      `📅 วันนี้คือวัน${now.format("dddd ที่ D MMMM")} ${buddhistYear}`
     );
   }
 
-  // ---------- AI RESPONSE ----------
+  if (lowerText.includes("ข้อมูลของฉัน")) {
+    return reply(
+      event,
+      `📌 ข้อมูลของคุณ\n\n👤 ชื่อ: ${user.name}\n🎂 อายุ: ${user.age}\n📅 วันเกิด: ${user.birthday}`
+    );
+  }
+
+  // ================= AI RESPONSE =================
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content:
-            `คุณคือแชทบอทที่สุภาพ เป็นกันเอง ตอบเป็นภาษาไทย และรู้จักผู้ใช้ชื่อ ${user.name}`,
+          content: `คุณคือแชทบอทที่สุภาพ เป็นกันเอง ตอบเป็นภาษาไทย และกำลังคุยกับผู้ใช้ชื่อ ${user.name}`,
         },
         { role: "user", content: userText },
       ],
@@ -156,6 +185,6 @@ app.get("/", (req, res) => {
   res.send("ok");
 });
 
-app.listen(8080, () =>
-  console.log("🚀 Server running on port 8080")
-);
+app.listen(8080, () => {
+  console.log("🚀 Server running on port 8080");
+});
