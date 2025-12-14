@@ -48,9 +48,8 @@ async function handleEvent(event) {
     return reply(event, "ข้อความยาวเกินไปครับ ขอไม่เกิน 500 ตัวอักษร 🙏");
   }
 
-  // ---------- TIME / DATE (ไม่ใช้ AI) ----------
+  // ================= TIME / DATE =================
   const now = moment().tz("Asia/Bangkok").locale("th");
-
   const buddhistYear2Digit = (now.year() + 543) % 100;
 
   if (lowerText.includes("กี่โมง") || lowerText.includes("เวลา")) {
@@ -66,15 +65,67 @@ async function handleEvent(event) {
 
   if (lowerText.includes("พรุ่งนี้")) {
     const tomorrow = now.clone().add(1, "day");
-    const tomorrowYear = (tomorrow.year() + 543) % 100;
+    const year = (tomorrow.year() + 543) % 100;
 
     return reply(
       event,
-      `📅 พรุ่งนี้คือวัน${tomorrow.format("dddd ที่ D MMMM")} ${tomorrowYear}`
+      `📅 พรุ่งนี้คือวัน${tomorrow.format("dddd ที่ D MMMM")} ${year}`
     );
   }
 
-  // ---------- GREETING ----------
+  // ================= COUNTDOWN : NEW YEAR =================
+  if (lowerText.includes("ปีใหม่")) {
+    const nextYear = now.year() + 1;
+    const newYear = moment.tz(`${nextYear}-01-01`, "Asia/Bangkok");
+    const diffDays = newYear.startOf("day").diff(now.startOf("day"), "days");
+
+    return reply(
+      event,
+      `🎆 เหลืออีก ${diffDays} วัน จะถึงวันปีใหม่ (1 มกราคม ${(nextYear + 543) % 100})`
+    );
+  }
+
+  // ================= COUNTDOWN : EXAM =================
+  // 🔧 เปลี่ยนวันสอบตรงนี้ได้
+  const examDate = moment.tz("2025-12-20", "Asia/Bangkok");
+
+  if (lowerText.includes("สอบ")) {
+    const diffDays = examDate.startOf("day").diff(now.startOf("day"), "days");
+
+    if (diffDays < 0) {
+      return reply(event, "📘 วันสอบผ่านไปแล้วครับ");
+    }
+
+    return reply(
+      event,
+      `📚 เหลืออีก ${diffDays} วัน จะถึงวันสอบ (${examDate.format("D MMMM")} ${(examDate.year() + 543) % 100})`
+    );
+  }
+
+  // ================= COUNTDOWN : BIRTHDAY =================
+  // 🔧 เปลี่ยนวันเกิดตรงนี้
+  const birthMonth = 2; // กุมภาพันธ์
+  const birthDay = 10;
+
+  if (lowerText.includes("วันเกิด")) {
+    let birthday = moment.tz(
+      `${now.year()}-${birthMonth}-${birthDay}`,
+      "Asia/Bangkok"
+    );
+
+    if (birthday.isBefore(now, "day")) {
+      birthday.add(1, "year");
+    }
+
+    const diffDays = birthday.startOf("day").diff(now.startOf("day"), "days");
+
+    return reply(
+      event,
+      `🎂 เหลืออีก ${diffDays} วัน จะถึงวันเกิดของคุณครับ 🎉`
+    );
+  }
+
+  // ================= GREETING =================
   if (lowerText.includes("สวัสดี") || lowerText.includes("hello")) {
     return client.replyMessage(event.replyToken, [
       { type: "text", text: "ยินดีที่ได้รู้จักครับ ผมชื่อ บอทไลน์ 😊" },
@@ -83,7 +134,7 @@ async function handleEvent(event) {
     ]);
   }
 
-  // ---------- AI RESPONSE ----------
+  // ================= AI RESPONSE =================
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -98,8 +149,7 @@ async function handleEvent(event) {
       max_tokens: 300,
     });
 
-    const aiReply = completion.choices[0].message.content;
-    return reply(event, aiReply);
+    return reply(event, completion.choices[0].message.content);
 
   } catch (error) {
     console.error("AI Error:", error);
