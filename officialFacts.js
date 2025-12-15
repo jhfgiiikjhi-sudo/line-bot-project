@@ -4,7 +4,7 @@ module.exports = {
   currency: "บาท",
   emergency: {
     police: "191",
-    fire: "199",
     ambulance: "1669",
+    fire: "199",
   },
 };
