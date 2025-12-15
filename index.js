@@ -7,17 +7,27 @@ const line = require("@line/bot-sdk");
 const OpenAI = require("openai");
 const moment = require("moment-timezone");
 require("moment/locale/th");
+const officialFacts = require("./officialFacts");
 
 // ================= USER MEMORY =================
 const USERS_FILE = "./users.json";
 let users = {};
 
 if (fs.existsSync(USERS_FILE)) {
-  users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  try {
+    users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  } catch (err) {
+    console.error("users.json เสียหรืออ่านไม่ได้", err);
+    users = {};
+  }
 }
 
 function saveUsers() {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch (err) {
+    console.error("ไม่สามารถบันทึก users.json ได้", err);
+  }
 }
 
 // ================= LINE CONFIG =================
@@ -48,11 +58,13 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 async function handleEvent(event) {
   if (event.type !== "message" || event.message.type !== "text") return null;
 
-  const userId = event.source.userId;
+  const userId = event.source?.userId;
+  if (!userId) return null;
+
   const userText = event.message.text.trim();
   const lowerText = userText.toLowerCase();
 
-  if (!userText) return reply(event, "พิมพ์ข้อความมาก่อนนะครับ 😊");
+  if (!userText) return reply(event, "พิมพ์ข้อความมาก่อนนะครับ");
 
   // ===== CREATE USER =====
   if (!users[userId]) {
@@ -66,34 +78,66 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
+  // ================= GREETING =================
+  if (lowerText.includes("สวัสดี")) {
+    if (!user.name) {
+      return reply(event, "สวัสดีครับ 😊\nขอทราบชื่อคุณหน่อยได้ไหมครับ");
+    }
+    return reply(event, `สวัสดีครับ ${user.name} 😊\nมีอะไรให้ผมช่วยไหมครับ`);
+  }
+
   // ===== ASK NAME =====
   if (user.step === "intro") {
     user.name = userText;
     user.step = "ask_age";
     saveUsers();
-    return reply(event, `ยินดีที่ได้รู้จักครับ ${user.name} 😊\nคุณอายุเท่าไหร่ครับ?`);
+    return reply(event, `ยินดีที่ได้รู้จักครับ ${user.name}\nคุณอายุเท่าไหร่ครับ?`);
   }
 
   // ===== ASK AGE =====
   if (user.step === "ask_age") {
-    const age = parseInt(userText);
-    if (isNaN(age)) return reply(event, "กรุณาพิมพ์อายุเป็นตัวเลขนะครับ 😊");
+    const age = Number(userText);
+    if (!Number.isInteger(age) || age <= 0 || age > 60) {
+      return reply(event, "กรุณาพิมพ์อายุเป็นตัวเลข 1–60 ปีนะครับ");
+    }
 
     user.age = age;
     user.step = "ask_birthday";
     saveUsers();
-    return reply(event, "วันเกิดของคุณวันที่เท่าไหร่ครับ?\n(ตัวอย่าง: 20/11/2548)");
+
+    return reply(
+      event,
+      "วันเกิดของคุณวันที่เท่าไหร่ครับ?\n(ตัวอย่าง: 20/11/2548)\nหรือพิมพ์ \"ข้าม\" หากไม่ต้องการบอก"
+    );
   }
 
-  // ===== ASK BIRTHDAY =====
+  // ===== ASK BIRTHDAY (OPTIONAL) =====
   if (user.step === "ask_birthday") {
+    if (["ข้าม", "ไม่บอก", "skip"].includes(lowerText)) {
+      user.birthday = null;
+      user.step = "done";
+      saveUsers();
+
+      return reply(
+        event,
+        `ขอบคุณครับ 🙏\n\n👤 ชื่อ: ${user.name}\n🎂 อายุ: ${user.age}\n📅 วันเกิด: ไม่ได้ระบุ`
+      );
+    }
+
+    if (!moment(userText, "DD/MM/YYYY", true).isValid()) {
+      return reply(
+        event,
+        "วันเกิดไม่ถูกต้องตามปฏิทินครับ\nหรือพิมพ์ \"ข้าม\" ได้"
+      );
+    }
+
     user.birthday = userText;
     user.step = "done";
     saveUsers();
 
     return reply(
       event,
-      `ขอบคุณครับ 🙏\n\n👤 ชื่อ: ${user.name}\n🎂 อายุ: ${user.age}\n📅 วันเกิด: ${user.birthday}\n\nผมจะจำคุณไว้แล้วครับ 😊`
+      `ขอบคุณครับ 🙏\n\n👤 ชื่อ: ${user.name}\n🎂 อายุ: ${user.age}\n📅 วันเกิด: ${user.birthday}`
     );
   }
 
@@ -125,9 +169,8 @@ async function handleEvent(event) {
   }
 
   // ================= COUNTDOWN : EXAM =================
-  const examDate = moment.tz("2025-12-20", "Asia/Bangkok");
-
   if (lowerText.includes("สอบ")) {
+    const examDate = moment.tz("2025-12-20", "Asia/Bangkok");
     const diff = examDate.startOf("day").diff(now.startOf("day"), "days");
 
     if (diff < 0) return reply(event, "📘 วันสอบผ่านไปแล้วครับ");
@@ -139,26 +182,36 @@ async function handleEvent(event) {
   }
 
   // ================= COUNTDOWN : BIRTHDAY =================
-  if (lowerText.includes("วันเกิด") && user.birthday) {
+  if (lowerText.includes("วันเกิด")) {
+    if (!user.birthday) {
+      return reply(event, "คุณยังไม่ได้บอกวันเกิดไว้ครับ");
+    }
+
     const [d, m] = user.birthday.split("/");
-
-    let birthday = moment.tz(
-      `${now.year()}-${m}-${d}`,
-      "Asia/Bangkok"
-    );
-
+    let birthday = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
     if (birthday.isBefore(now, "day")) birthday.add(1, "year");
 
     const diff = birthday.startOf("day").diff(now.startOf("day"), "days");
-
     return reply(event, `🎂 เหลืออีก ${diff} วัน จะถึงวันเกิดของคุณครับ 🎉`);
   }
 
-  // ================= GREETING =================
-  if (lowerText.includes("สวัสดี")) {
+  // ================= OFFICIAL FACTS =================
+  if (lowerText.includes("นายก")) {
+    return reply(event, `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`);
+  }
+
+  if (lowerText.includes("เมืองหลวง")) {
+    return reply(event, `เมืองหลวงของประเทศไทยคือ ${officialFacts.capital} ครับ`);
+  }
+
+  if (lowerText.includes("สกุลเงิน")) {
+    return reply(event, `สกุลเงินของประเทศไทยคือ ${officialFacts.currency} ครับ`);
+  }
+
+  if (lowerText.includes("เบอร์ฉุกเฉิน")) {
     return reply(
       event,
-      `สวัสดีครับ ${user.name} 😊\nมีอะไรให้ผมช่วยไหมครับ`
+      `📞 เบอร์ฉุกเฉินในประเทศไทย\n🚓 ตำรวจ: ${officialFacts.emergency.police}\n🚑 รถพยาบาล: ${officialFacts.emergency.ambulance}\n🔥 ดับเพลิง: ${officialFacts.emergency.fire}`
     );
   }
 
@@ -169,7 +222,17 @@ async function handleEvent(event) {
       messages: [
         {
           role: "system",
-          content: `คุณคือแชทบอทที่สุภาพ เป็นกันเอง ตอบภาษาไทย และรู้จักผู้ใช้ชื่อ ${user.name}`,
+          content: `
+คุณคือแชทบอทภาษาไทย สุภาพ เป็นกันเอง
+ข้อมูลทางการ:
+- นายกรัฐมนตรี: ${officialFacts.primeMinister}
+- เมืองหลวง: ${officialFacts.capital}
+- สกุลเงิน: ${officialFacts.currency}
+
+กฎ:
+- ห้ามเดาข้อมูลทางการ
+- ถ้าไม่แน่ใจ ให้ปฏิเสธอย่างสุภาพ
+`,
         },
         { role: "user", content: userText },
       ],
@@ -177,7 +240,6 @@ async function handleEvent(event) {
     });
 
     return reply(event, completion.choices[0].message.content);
-
   } catch (err) {
     console.error("AI Error:", err);
     return reply(event, "ขออภัยครับ ระบบ AI มีปัญหาชั่วคราว 😢");
