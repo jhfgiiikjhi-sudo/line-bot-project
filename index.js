@@ -9,7 +9,7 @@ const moment = require("moment-timezone");
 require("moment/locale/th");
 const officialFacts = require("./officialFacts");
 
-// ================= USER STORAGE =================
+// ================= USER MEMORY =================
 const USERS_FILE = "./users.json";
 let users = {};
 
@@ -42,25 +42,23 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
     await Promise.all(req.body.events.map(handleEvent));
     res.json({ status: "ok" });
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).end();
   }
 });
 
 // ================= MAIN LOGIC =================
 async function handleEvent(event) {
-  if (event.type !== "message" || event.message.type !== "text") {
-    return reply(event, "ขออภัยครับ รองรับเฉพาะข้อความเท่านั้น 😊");
-  }
+  if (event.type !== "message" || event.message.type !== "text")
+    return reply(event, "ขออภัยครับ ข้อความนี้ไม่รองรับ 😊");
 
   const userId = event.source?.userId;
-  if (!userId) return reply(event, "เกิดข้อผิดพลาดในการระบุตัวตน");
+  if (!userId) return reply(event, "ไม่สามารถระบุตัวตนผู้ใช้ได้ครับ");
 
   const userText = event.message.text.trim();
   const lowerText = userText.toLowerCase();
 
-  if (!userText) return reply(event, "กรุณาพิมพ์ข้อความก่อนนะครับ");
+  if (!userText) return reply(event, "กรุณาพิมพ์ข้อความก่อนนะครับ 😊");
 
   // ===== CREATE USER =====
   if (!users[userId]) {
@@ -71,72 +69,74 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
-  // ================= RESET =================
-  if (lowerText === "รีเซ็ต") {
-    delete users[userId];
+  // ================= RESET NAME (GLOBAL) =================
+  if (
+    lowerText.includes("เปลี่ยนชื่อ") ||
+    lowerText.includes("ขอพิมพ์ชื่อใหม่")
+  ) {
+    user.step = "ask_name";
+    delete user.name;
     saveUsers();
-    return reply(event, "รีเซ็ตข้อมูลเรียบร้อยแล้วครับ 🔄");
+    return reply(event, "ได้เลยครับ 😊 กรุณาพิมพ์ชื่อใหม่ของคุณ");
   }
 
   // ================= ASK NAME (STRICT) =================
   if (user.step === "ask_name") {
-    const text = userText;
-    const lower = text.toLowerCase();
-
     const banned = [
-      "ไม่บอก", "test", "ทดสอบ", "123", "abc", "xxx", "zzz"
+      "ข้าม",
+      "skip",
+      "ไม่บอก",
+      "ไม่บอกชื่อ",
+      "test",
+      "ทดสอบ",
+      "123",
+      "abc",
+      "xxx",
+      "zzz",
     ];
 
-    if (banned.includes(lower)) {
-      return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่ใช้เรียกได้ครับ");
+    if (
+      banned.includes(lowerText) ||
+      userText.length < 2 ||
+      userText.length > 20 ||
+      !/^[ก-๙a-zA-Z\s]+$/.test(userText)
+    ) {
+      return reply(
+        event,
+        "❌ กรุณาพิมพ์ชื่อจริงที่ใช้เรียก (ภาษาไทยหรืออังกฤษ 2–20 ตัวอักษร)\n*ขั้นตอนนี้ไม่สามารถข้ามได้ครับ*"
+      );
     }
 
-    if (text.length < 2 || text.length > 30) {
-      return reply(event, "❌ ชื่อควรยาว 2–30 ตัวอักษร");
-    }
-
-    if (!/^[a-zA-Zก-๙\s]+$/.test(text)) {
-      return reply(event, "❌ ใช้ได้เฉพาะภาษาไทยหรืออังกฤษเท่านั้น");
-    }
-
-    const unique = new Set(text.replace(/\s/g, "").split(""));
-    if (unique.size < 2) {
-      return reply(event, "❌ กรุณาอย่าพิมพ์ตัวอักษรซ้ำ ๆ");
-    }
-
-    if (text.replace(/\s/g, "").length < 3) {
-      return reply(event, "❌ กรุณาพิมพ์ชื่อให้ชัดเจนกว่านี้");
-    }
-
-    user.name = text;
+    user.name = userText;
     user.step = "ask_age";
     saveUsers();
-
-    return reply(event, `ยินดีที่ได้รู้จักครับ ${user.name} 😊\nคุณอายุเท่าไหร่ครับ?`);
+    return reply(
+      event,
+      `ยินดีที่ได้รู้จักครับ ${user.name} 😊\nคุณอายุเท่าไหร่ครับ?`
+    );
   }
 
-  // ================= ASK AGE =================
+  // ================= ASK AGE (STRICT) =================
   if (user.step === "ask_age") {
-    if (!/^\d+$/.test(userText)) {
-      return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลขเท่านั้น (1–60)");
+    if (["ข้าม", "skip", "ไม่บอก"].includes(lowerText)) {
+      return reply(event, "❌ ขั้นตอนอายุไม่สามารถข้ามได้ครับ");
     }
 
     const age = Number(userText);
-    if (age < 1 || age > 60) {
-      return reply(event, "❌ อายุควรอยู่ระหว่าง 1–60 ปี");
+    if (!Number.isInteger(age) || age < 1 || age > 60) {
+      return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–60 เท่านั้น");
     }
 
     user.age = age;
     user.step = "ask_birthday";
     saveUsers();
-
     return reply(
       event,
       "วันเกิดของคุณวันไหนครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ \"ข้าม\""
     );
   }
 
-  // ================= ASK BIRTHDAY =================
+  // ================= ASK BIRTHDAY (OPTIONAL) =================
   if (user.step === "ask_birthday") {
     if (["ข้าม", "skip", "ไม่บอก"].includes(lowerText)) {
       user.birthday = null;
@@ -144,18 +144,20 @@ async function handleEvent(event) {
       saveUsers();
       return reply(
         event,
-        `ขอบคุณครับ 🙏\n👤 ${user.name}\n🎂 อายุ ${user.age} ปี`
+        `ขอบคุณครับ 🙏\n👤 ${user.name}\n🎂 อายุ ${user.age} ปี\n📅 วันเกิด: ไม่ได้ระบุ`
       );
     }
 
     if (!moment(userText, "DD/MM/YYYY", true).isValid()) {
-      return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง (DD/MM/YYYY)");
+      return reply(
+        event,
+        "❌ รูปแบบวันเกิดไม่ถูกต้อง\nกรุณาพิมพ์ DD/MM/YYYY หรือพิมพ์ \"ข้าม\""
+      );
     }
 
     user.birthday = userText;
     user.step = "done";
     saveUsers();
-
     return reply(
       event,
       `ขอบคุณครับ 🙏\n👤 ${user.name}\n🎂 อายุ ${user.age} ปี\n📅 วันเกิด ${user.birthday}`
@@ -165,45 +167,66 @@ async function handleEvent(event) {
   // ================= TIME / DATE =================
   const now = moment().tz("Asia/Bangkok").locale("th");
 
-  if (lowerText.includes("กี่โมง")) {
+  if (lowerText.includes("เวลา") || lowerText.includes("กี่โมง")) {
     return reply(event, `⏰ ตอนนี้เวลา ${now.format("HH:mm")} น.`);
   }
 
-  if (lowerText.includes("วันนี้")) {
-    return reply(event, `📅 วันนี้คือวัน${now.format("dddd ที่ D MMMM YYYY")}`);
+  // ================= BIRTHDAY COUNTDOWN =================
+  if (lowerText.includes("วันเกิด")) {
+    if (!user.birthday)
+      return reply(event, "คุณยังไม่ได้บอกวันเกิดไว้ครับ");
+
+    const [d, m] = user.birthday.split("/");
+    let next = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
+    if (next.isBefore(now, "day")) next.add(1, "year");
+
+    const diff = next.startOf("day").diff(now.startOf("day"), "days");
+    return reply(event, `🎂 เหลืออีก ${diff} วัน จะถึงวันเกิดของคุณครับ`);
   }
 
   // ================= FUTURE BLOCK =================
   if (
     lowerText.includes("นายก") &&
-    (lowerText.includes("ต่อไป") || lowerText.includes("ในอนาคต"))
+    (lowerText.includes("ต่อไป") ||
+      lowerText.includes("อนาคต") ||
+      lowerText.includes("คนหน้า"))
   ) {
-    return reply(event, "ขออภัยครับ 🙏 ไม่สามารถคาดเดาข้อมูลอนาคตได้");
+    return reply(
+      event,
+      "ขออภัยครับ 🙏 เรื่องอนาคตยังไม่สามารถยืนยันได้ ผมไม่สามารถคาดเดาได้ครับ"
+    );
   }
 
   // ================= OFFICIAL FACTS =================
   if (lowerText.includes("นายก")) {
-    return reply(event, `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`);
+    return reply(
+      event,
+      `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`
+    );
   }
 
-  // ================= AI =================
+  // ================= AI FALLBACK =================
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "คุณคือแชทบอทภาษาไทย สุภาพ" },
-        { role: "user", content: userText }
+        {
+          role: "system",
+          content:
+            "คุณคือแชทบอทภาษาไทย สุภาพ ห้ามเดาข้อมูลทางการ ถ้าไม่แน่ใจให้ปฏิเสธอย่างสุภาพ",
+        },
+        { role: "user", content: userText },
       ],
-      max_tokens: 300,
+      max_tokens: 200,
     });
 
     return reply(event, completion.choices[0].message.content);
   } catch {
-    return reply(event, "ระบบตอบช้าชั่วคราว ขออภัยครับ 🙏");
+    return reply(event, "ขออภัยครับ ระบบตอบช้าชั่วคราว 🙏");
   }
 }
 
-// ================= REPLY =================
+// ================= HELPER =================
 function reply(event, text) {
   return client.replyMessage(event.replyToken, {
     type: "text",
@@ -211,6 +234,6 @@ function reply(event, text) {
   });
 }
 
-// ================= SERVER =================
-app.get("/", (req, res) => res.send("OK"));
-app.listen(8080, () => console.log("🚀 Bot running"));
+// ================= TEST =================
+app.get("/", (req, res) => res.send("ok"));
+app.listen(8080, () => console.log("🚀 Server running"));
