@@ -49,6 +49,33 @@ const openai = new OpenAI({
 });
 
 // ================= UTIL =================
+
+// ❌ คำที่ไม่ถือเป็นชื่อคน
+const FORBIDDEN_NAMES = [
+  "สวัสดี",
+  "หวัดดี",
+  "ขอบคุณ",
+  "ครับ",
+  "ค่ะ",
+  "ดีครับ",
+  "ดีค่ะ",
+  "ทดสอบ",
+  "hello",
+  "hi",
+  "hey",
+  "ok",
+  "okay",
+  "test",
+  "admin",
+  "user",
+  "bot",
+  "system",
+];
+
+function isForbidden(text) {
+  return FORBIDDEN_NAMES.includes(text.toLowerCase());
+}
+
 function isRepeated(text) {
   return /^(.)(\1{2,})$/.test(text);
 }
@@ -81,10 +108,7 @@ async function handleEvent(event) {
   const now = moment().tz("Asia/Bangkok").locale("th");
 
   // ===== spam / garbage =====
-  if (
-    text.length > 30 ||
-    /^[^ก-๙a-zA-Z0-9]+$/.test(text)
-  ) {
+  if (text.length > 30 || /^[^ก-๙a-zA-Z0-9]+$/.test(text)) {
     return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
   }
 
@@ -123,6 +147,7 @@ async function handleEvent(event) {
 
     const invalid =
       isRepeated(text) ||
+      isForbidden(text) ||
       !validThaiEng(text, 2, 20) ||
       (/^[ก-ฮ]+$/.test(text) && !/[ะาิีึืุูเแโใไำ]/.test(text)) ||
       (/^[a-zA-Z]+$/.test(text) && !/[aeiou]/i.test(text));
@@ -130,7 +155,7 @@ async function handleEvent(event) {
     if (invalid)
       return reply(
         event,
-        "❌ กรุณาพิมพ์ชื่อจริงที่อ่านได้ (ไทย/อังกฤษ 2–20 ตัว)"
+        "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง (ไม่ใช่คำทักทายหรือคำทั่วไป)"
       );
 
     user.realName = text;
@@ -147,13 +172,13 @@ async function handleEvent(event) {
     if (lower === "ข้าม")
       return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
 
-    if (isRepeated(text) || !validThaiEng(text, 1, 15))
-      return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
+    if (isRepeated(text) || isForbidden(text) || !validThaiEng(text, 1, 15))
+      return reply(event, "❌ ชื่อเล่นต้องเป็นชื่อคน ไม่ใช่คำทักทาย");
 
     user.nickName = text;
     user.step = "ask_age";
     saveUsers();
-    return reply(event, "สุดท้ายแล้วครับ 🎂\nคุณอายุเท่าไหร่?");
+    return reply(event, "ต่อไปขอทราบอายุของคุณครับ 🎂");
   }
 
   // ================= ASK AGE =================
@@ -167,7 +192,7 @@ async function handleEvent(event) {
     saveUsers();
     return reply(
       event,
-      'วันเกิดของคุณวันไหนครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ "ข้าม"'
+      'ต้องการบอกวันเกิดไหมครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ "ข้าม"'
     );
   }
 
@@ -249,7 +274,7 @@ async function handleEvent(event) {
       `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`
     );
 
-  // ================= AI FALLBACK (LAST) =================
+  // ================= AI FALLBACK =================
   try {
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -261,7 +286,7 @@ async function handleEvent(event) {
     });
     return reply(event, res.choices[0].message.content);
   } catch {
-    return reply(event, "ขออภัยครับ ระบบตอบช้าชั่วคราว 🙏");
+    return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
   }
 }
 
