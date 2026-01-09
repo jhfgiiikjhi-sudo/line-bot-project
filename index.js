@@ -1,3 +1,7 @@
+// ================================
+// STC Chatbot - index.js
+// ================================
+
 const express = require("express");
 const app = express();
 require("dotenv").config();
@@ -40,6 +44,34 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
+// ================= UTILITIES =================
+function isRepeatedChars(text) {
+  return /^(.)(\1{2,})$/.test(text);
+}
+
+function looksRandom(text) {
+  const vowels = text.match(/[aeiouกะาิีึืุูเแโใไ]/gi) || [];
+  return vowels.length < text.length / 5;
+}
+
+function isValidRealName(text) {
+  if (!/^[A-Za-zก-๙]{2,20}$/.test(text)) return false;
+  if (isRepeatedChars(text)) return false;
+  if (looksRandom(text)) return false;
+  return true;
+}
+
+function isValidNickName(text) {
+  if (!/^[A-Za-zก-๙]{1,15}$/.test(text)) return false;
+  if (isRepeatedChars(text)) return false;
+  return true;
+}
+
+function isValidAge(text) {
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 1 && n <= 80;
+}
+
 // ================= WEBHOOK =================
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
@@ -71,23 +103,31 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
-  // ================= RESET NAME =================
-  if (lower.includes("เปลี่ยนชื่อ")) {
-    users[userId] = { step: "ask_realname" };
+  // ================= CHANGE COMMANDS =================
+  if (lower === "เปลี่ยนชื่อ") {
+    user.step = "ask_realname";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อจริงใหม่");
   }
 
+  if (lower === "เปลี่ยนชื่อเล่น") {
+    user.step = "ask_nickname";
+    saveUsers();
+    return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อเล่นใหม่");
+  }
+
+  if (lower === "เปลี่ยนอายุ") {
+    user.step = "ask_age";
+    saveUsers();
+    return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์อายุของคุณ");
+  }
+
   // ================= ASK REAL NAME =================
   if (user.step === "ask_realname") {
-    const invalid =
-      /^(.)(\1)+$/.test(text) ||
-      !/^[ก-๙a-zA-Z]{2,20}$/.test(text) ||
-      (/^[ก-ฮ]+$/.test(text) && !/[ะาิีึืุูเแโใไำ]/.test(text)) ||
-      (/^[a-zA-Z]+$/.test(text) &&
-        (!/[aeiou]/i.test(text) || /(.)\1{3,}/i.test(text)));
+    if (text === "ข้าม")
+      return reply(event, "❌ ไม่สามารถข้ามชื่อจริงได้");
 
-    if (invalid)
+    if (!isValidRealName(text))
       return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่อ่านได้ (ไทย/อังกฤษ 2–20 ตัว)");
 
     user.realName = text;
@@ -98,7 +138,10 @@ async function handleEvent(event) {
 
   // ================= ASK NICKNAME =================
   if (user.step === "ask_nickname") {
-    if (!/^[ก-๙a-zA-Z]{1,15}$/.test(text))
+    if (text === "ข้าม")
+      return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
+
+    if (!isValidNickName(text))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
     user.nickName = text;
@@ -109,11 +152,10 @@ async function handleEvent(event) {
 
   // ================= ASK AGE =================
   if (user.step === "ask_age") {
-    const age = Number(text);
-    if (!Number.isInteger(age) || age < 1 || age > 80)
+    if (!isValidAge(text))
       return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–80");
 
-    user.age = age;
+    user.age = Number(text);
     user.step = "ask_birthday";
     saveUsers();
     return reply(
@@ -124,18 +166,16 @@ async function handleEvent(event) {
 
   // ================= ASK BIRTHDAY =================
   if (user.step === "ask_birthday") {
-    if (["ข้าม", "skip"].includes(lower)) {
-      user.birthday = null;
-    } else {
+    if (!["ข้าม", "skip"].includes(lower)) {
       if (!moment(text, "DD/MM/YYYY", true).isValid())
         return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง");
-
       user.birthday = text;
+    } else {
+      user.birthday = null;
     }
 
     user.step = "done";
 
-    // ===== STATS =====
     nameStats.real[user.realName] =
       (nameStats.real[user.realName] || 0) + 1;
     nameStats.nick[user.nickName] =
@@ -174,8 +214,7 @@ async function handleEvent(event) {
     const [d, m] = user.birthday.split("/");
     let next = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
     if (next.isBefore(now, "day")) next.add(1, "year");
-    const diff = next.diff(now, "days");
-    return reply(event, `🎂 เหลืออีก ${diff} วันจะถึงวันเกิดคุณครับ`);
+    return reply(event, `🎂 เหลืออีก ${next.diff(now, "days")} วันจะถึงวันเกิดคุณครับ`);
   }
 
   // ================= OFFICIAL FACT =================
