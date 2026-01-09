@@ -1,5 +1,5 @@
 // ================================
-// STC Chatbot - index.js
+// STC Chatbot - index.js (FINAL)
 // ================================
 
 const express = require("express");
@@ -21,10 +21,14 @@ let users = {};
 let nameStats = { real: {}, nick: {} };
 
 if (fs.existsSync(USERS_FILE)) {
-  try { users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8")); } catch {}
+  try {
+    users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  } catch {}
 }
 if (fs.existsSync(NAME_STATS_FILE)) {
-  try { nameStats = JSON.parse(fs.readFileSync(NAME_STATS_FILE, "utf8")); } catch {}
+  try {
+    nameStats = JSON.parse(fs.readFileSync(NAME_STATS_FILE, "utf8"));
+  } catch {}
 }
 
 const saveUsers = () =>
@@ -44,32 +48,13 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
-// ================= UTILITIES =================
-function isRepeatedChars(text) {
+// ================= UTIL =================
+function isRepeated(text) {
   return /^(.)(\1{2,})$/.test(text);
 }
 
-function looksRandom(text) {
-  const vowels = text.match(/[aeiouกะาิีึืุูเแโใไ]/gi) || [];
-  return vowels.length < text.length / 5;
-}
-
-function isValidRealName(text) {
-  if (!/^[A-Za-zก-๙]{2,20}$/.test(text)) return false;
-  if (isRepeatedChars(text)) return false;
-  if (looksRandom(text)) return false;
-  return true;
-}
-
-function isValidNickName(text) {
-  if (!/^[A-Za-zก-๙]{1,15}$/.test(text)) return false;
-  if (isRepeatedChars(text)) return false;
-  return true;
-}
-
-function isValidAge(text) {
-  const n = Number(text);
-  return Number.isInteger(n) && n >= 1 && n <= 80;
+function validThaiEng(text, min, max) {
+  return /^[ก-๙a-zA-Z]+$/.test(text) && text.length >= min && text.length <= max;
 }
 
 // ================= WEBHOOK =================
@@ -95,6 +80,15 @@ async function handleEvent(event) {
   const lower = text.toLowerCase();
   const now = moment().tz("Asia/Bangkok").locale("th");
 
+  // ===== spam / garbage =====
+  if (
+    text.length > 30 ||
+    /^[^ก-๙a-zA-Z0-9]+$/.test(text)
+  ) {
+    return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
+  }
+
+  // ===== create user =====
   if (!users[userId]) {
     users[userId] = { step: "ask_realname" };
     saveUsers();
@@ -103,20 +97,20 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
-  // ================= CHANGE COMMANDS =================
-  if (lower === "เปลี่ยนชื่อ") {
-    user.step = "ask_realname";
-    saveUsers();
-    return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อจริงใหม่");
-  }
-
-  if (lower === "เปลี่ยนชื่อเล่น") {
+  // ================= CHANGE =================
+  if (lower.includes("เปลี่ยนชื่อเล่น")) {
     user.step = "ask_nickname";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อเล่นใหม่");
   }
 
-  if (lower === "เปลี่ยนอายุ") {
+  if (lower.includes("เปลี่ยนชื่อ")) {
+    user.step = "ask_realname";
+    saveUsers();
+    return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อจริงใหม่");
+  }
+
+  if (lower.includes("เปลี่ยนอายุ")) {
     user.step = "ask_age";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์อายุของคุณ");
@@ -124,24 +118,36 @@ async function handleEvent(event) {
 
   // ================= ASK REAL NAME =================
   if (user.step === "ask_realname") {
-    if (text === "ข้าม")
+    if (lower === "ข้าม")
       return reply(event, "❌ ไม่สามารถข้ามชื่อจริงได้");
 
-    if (!isValidRealName(text))
-      return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่อ่านได้ (ไทย/อังกฤษ 2–20 ตัว)");
+    const invalid =
+      isRepeated(text) ||
+      !validThaiEng(text, 2, 20) ||
+      (/^[ก-ฮ]+$/.test(text) && !/[ะาิีึืุูเแโใไำ]/.test(text)) ||
+      (/^[a-zA-Z]+$/.test(text) && !/[aeiou]/i.test(text));
+
+    if (invalid)
+      return reply(
+        event,
+        "❌ กรุณาพิมพ์ชื่อจริงที่อ่านได้ (ไทย/อังกฤษ 2–20 ตัว)"
+      );
 
     user.realName = text;
     user.step = "ask_nickname";
     saveUsers();
-    return reply(event, `ขอบคุณครับ ${text} 😊\nขอทราบ **ชื่อเล่น** ด้วยครับ`);
+    return reply(
+      event,
+      `ขอบคุณครับ ${text} 😊\nขอทราบ **ชื่อเล่น** ด้วยครับ`
+    );
   }
 
   // ================= ASK NICKNAME =================
   if (user.step === "ask_nickname") {
-    if (text === "ข้าม")
+    if (lower === "ข้าม")
       return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
 
-    if (!isValidNickName(text))
+    if (isRepeated(text) || !validThaiEng(text, 1, 15))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
     user.nickName = text;
@@ -152,26 +158,28 @@ async function handleEvent(event) {
 
   // ================= ASK AGE =================
   if (user.step === "ask_age") {
-    if (!isValidAge(text))
+    const age = Number(text);
+    if (!Number.isInteger(age) || age < 1 || age > 80)
       return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–80");
 
-    user.age = Number(text);
+    user.age = age;
     user.step = "ask_birthday";
     saveUsers();
     return reply(
       event,
-      "วันเกิดของคุณวันไหนครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ \"ข้าม\""
+      'วันเกิดของคุณวันไหนครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ "ข้าม"'
     );
   }
 
   // ================= ASK BIRTHDAY =================
   if (user.step === "ask_birthday") {
-    if (!["ข้าม", "skip"].includes(lower)) {
+    if (lower === "ข้าม") {
+      user.birthday = null;
+    } else {
       if (!moment(text, "DD/MM/YYYY", true).isValid())
         return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง");
+
       user.birthday = text;
-    } else {
-      user.birthday = null;
     }
 
     user.step = "done";
@@ -190,6 +198,33 @@ async function handleEvent(event) {
     );
   }
 
+  // ================= TIME / DATE =================
+  if (
+    lower.includes("กี่โมง") ||
+    lower.includes("เวลา") ||
+    lower.includes("วันที่") ||
+    lower.includes("วันอะไร")
+  ) {
+    return reply(
+      event,
+      `⏰ ตอนนี้เวลา ${now.format("HH:mm")} น.\n📅 วันนี้วันที่ ${now.format(
+        "D MMMM YYYY"
+      )}`
+    );
+  }
+
+  // ================= BIRTHDAY COUNT =================
+  if (lower.includes("วันเกิด")) {
+    if (!user.birthday)
+      return reply(event, "คุณยังไม่ได้บันทึกวันเกิดไว้ครับ 😊");
+
+    const [d, m] = user.birthday.split("/");
+    let next = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
+    if (next.isBefore(now, "day")) next.add(1, "year");
+    const diff = next.diff(now, "days");
+    return reply(event, `🎂 เหลืออีก ${diff} วัน จะถึงวันเกิดของคุณครับ`);
+  }
+
   // ================= TOP NAME =================
   if (lower === "/topname") {
     const top = (obj) =>
@@ -201,20 +236,10 @@ async function handleEvent(event) {
 
     return reply(
       event,
-      `📊 ชื่อยอดนิยม\n\n🪪 ชื่อจริง:\n${top(nameStats.real)}\n\n🎭 ชื่อเล่น:\n${top(nameStats.nick)}`
+      `📊 ชื่อยอดนิยม\n\n🪪 ชื่อจริง:\n${top(
+        nameStats.real
+      )}\n\n🎭 ชื่อเล่น:\n${top(nameStats.nick)}`
     );
-  }
-
-  // ================= TIME =================
-  if (lower.includes("เวลา"))
-    return reply(event, `⏰ ตอนนี้เวลา ${now.format("HH:mm")} น.`);
-
-  // ================= BIRTHDAY COUNTDOWN =================
-  if (lower.includes("วันเกิด") && user.birthday) {
-    const [d, m] = user.birthday.split("/");
-    let next = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
-    if (next.isBefore(now, "day")) next.add(1, "year");
-    return reply(event, `🎂 เหลืออีก ${next.diff(now, "days")} วันจะถึงวันเกิดคุณครับ`);
   }
 
   // ================= OFFICIAL FACT =================
@@ -224,7 +249,7 @@ async function handleEvent(event) {
       `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`
     );
 
-  // ================= AI FALLBACK =================
+  // ================= AI FALLBACK (LAST) =================
   try {
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
