@@ -184,9 +184,6 @@ async function handleEvent(event) {
 
   const user = users[userId];
 
-  badCount: 0
-    blockedUntil: null
-
   // ====================================
 // ADD: BAD WORD HANDLER (PATCH ONLY)
 // ====================================
