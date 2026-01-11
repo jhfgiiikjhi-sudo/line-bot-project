@@ -112,6 +112,11 @@ const BAD_WORDS = [
   "fuck","shit","bitch","asshole","motherfucker"
 ];
 
+function hasBadWord(text) {
+  const clean = text.replace(/\s+/g, "").toLowerCase();
+  return BAD_WORDS.some(w => clean.includes(w));
+}
+
 // ลบช่องว่าง เช่น "ค ว ย" → "ควย"
 function normalizeBadWord(text) {
   return text.toLowerCase().replace(/\s+/g, "");
@@ -153,6 +158,26 @@ async function handleEvent(event) {
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
     return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
 
+  if (hasBadWord(text)) {
+  user.badCount = (user.badCount || 0) + 1;
+
+  if (user.badCount >= 3) {
+    user.blockedUntil = moment().add(1, "minute");
+    user.badCount = 0;
+    saveUsers();
+    return reply(
+      event,
+      "⛔ ตรวจพบคำไม่เหมาะสมซ้ำหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
+    );
+  }
+
+  saveUsers();
+  return reply(
+    event,
+    `⚠️ กรุณาใช้คำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
+  );
+}
+
   // ===== create user =====
   if (!users[userId]) {
     users[userId] = { step: "ask_realname", badWordCount: 0 };
@@ -181,6 +206,15 @@ if (hasBadWord(text)) {
   }
 
   return reply(event, "🚫 ขออภัยครับ ผมไม่สามารถตอบข้อความลักษณะนี้ได้");
+}
+
+  // ====================================
+  if (user.blockedUntil && moment().isBefore(user.blockedUntil)) {
+  const diff = moment(user.blockedUntil).diff(moment(), "seconds");
+  return reply(
+    event,
+    `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
+  );
 }
 
   // ====================================
