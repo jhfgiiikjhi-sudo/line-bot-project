@@ -262,14 +262,17 @@ if (hasBadWord(text)) {
     if (!isHumanName(text, 1, 15))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
-    // ป้องกันเอาชื่อจริงมาใส่ชื่อเล่น
-    if (
-    user.realName &&
-      text.length >= user.realName.length + 3
-) {
+    // กรณีมีแนวโน้มว่าสลับชื่อ
+  if (nickName.length > realName.length + 3) {
+    user.realName = "";
+    user.nickName = "";
+    user.step = "ask_realname";
+      saveUsers();
+
   return reply(
     event,
-    "⚠️ ชื่อเล่นมักสั้นกว่าชื่อจริงนะครับ\nกรุณาพิมพ์ **ชื่อเล่น** ใหม่อีกครั้ง"
+    "⚠️ ดูเหมือนคุณอาจใส่ **ชื่อจริงและชื่อเล่นสลับกัน**\n" +
+    "กรุณาพิมพ์ **ชื่อจริง** ใหม่อีกครั้งครับ"
   );
 }
 
