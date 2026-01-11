@@ -82,6 +82,28 @@ function isHumanName(text, min, max) {
   return true;
 }
 
+function looksSwapped(real, nick) {
+  if (!real || !nick) return false;
+
+  // ชื่อเล่นยาวกว่าชื่อจริงมาก = น่าสงสัย
+  if (nick.length >= real.length + 3) return true;
+
+  // ชื่อจริงสั้นมาก แต่ชื่อเล่นยาว
+  if (real.length <= 3 && nick.length >= 6) return true;
+
+  return false;
+}
+
+function isLikelyNickname(text) {
+  // ชื่อเล่นมักสั้น
+  if (text.length <= 4) return true;
+
+  // ชื่อเล่นไม่ค่อยยาวมาก
+  if (text.length >= 8) return false;
+
+  return true;
+}
+
 // ========================================
 // ADD: BAD WORD FILTER (PATCH ONLY)
 // ========================================
@@ -135,10 +157,13 @@ async function handleEvent(event) {
   if (!users[userId]) {
     users[userId] = { step: "ask_realname", badWordCount: 0 };
     saveUsers();
-    return reply(event, "สวัสดีครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ");
+    return reply(event, "สวัสดีครับ ก่อนเริ่มคุยกันผมขอทำความรู้จักคุณหน่อยนะครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ");
   }
 
   const user = users[userId];
+
+  badCount: 0
+    blockedUntil: null
 
   // ====================================
 // ADD: BAD WORD HANDLER (PATCH ONLY)
@@ -203,6 +228,17 @@ if (hasBadWord(text)) {
     if (!isHumanName(text, 1, 15))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
+    // ป้องกันเอาชื่อจริงมาใส่ชื่อเล่น
+    if (
+    user.realName &&
+      text.length >= user.realName.length + 3
+) {
+  return reply(
+    event,
+    "⚠️ ชื่อเล่นมักสั้นกว่าชื่อจริงนะครับ\nกรุณาพิมพ์ **ชื่อเล่น** ใหม่อีกครั้ง"
+  );
+}
+
     user.nickName = text;
     user.step = "ask_age";
     saveUsers();
@@ -212,8 +248,8 @@ if (hasBadWord(text)) {
 
   if (user.step === "ask_age") {
     const age = Number(text);
-    if (!Number.isInteger(age) || age < 1 || age > 80)
-      return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–80");
+    if (!Number.isInteger(age) || age < 1 || age > 60)
+      return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–60");
 
     user.age = age;
     user.step = "ask_birthday";
@@ -233,6 +269,15 @@ if (hasBadWord(text)) {
         return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง");
       user.birthday = text;
     }
+
+    if (looksSwapped(user.realName, user.nickName)) {
+      user.step = "ask_realname";
+  saveUsers();
+      return reply(
+      event,
+      "⚠️ ดูเหมือนคุณอาจใส่ชื่อจริงและชื่อเล่นสลับกัน\nกรุณาพิมพ์ **ชื่อจริง** ใหม่อีกครั้งครับ"
+    );
+}
 
     user.step = "done";
 
