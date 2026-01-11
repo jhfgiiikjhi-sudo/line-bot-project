@@ -83,6 +83,24 @@ function isHumanName(text, min, max) {
 }
 
 // ========================================
+// ADD: BAD WORD FILTER (PATCH ONLY)
+// ========================================
+const BAD_WORDS = [
+  "ควย","เหี้ย","สัส","ห่า","หี","ชิบหาย","ฉิบหาย",
+  "fuck","shit","bitch","asshole","motherfucker"
+];
+
+// ลบช่องว่าง เช่น "ค ว ย" → "ควย"
+function normalizeBadWord(text) {
+  return text.toLowerCase().replace(/\s+/g, "");
+}
+
+function hasBadWord(text) {
+  const clean = normalizeBadWord(text);
+  return BAD_WORDS.some(word => clean.includes(word));
+}
+
+// ========================================
 // WEBHOOK
 // ========================================
 app.post("/webhook", line.middleware(config), async (req, res) => {
@@ -115,12 +133,30 @@ async function handleEvent(event) {
 
   // ===== create user =====
   if (!users[userId]) {
-    users[userId] = { step: "ask_realname" };
+    users[userId] = { step: "ask_realname", badWordCount: 0 };
     saveUsers();
     return reply(event, "สวัสดีครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ");
   }
 
   const user = users[userId];
+
+  // ====================================
+// ADD: BAD WORD HANDLER (PATCH ONLY)
+// ====================================
+if (hasBadWord(text)) {
+  user.badWordCount = (user.badWordCount || 0) + 1;
+  saveUsers();
+
+  if (user.badWordCount === 1) {
+    return reply(event, "⚠️ ขอความร่วมมือใช้ถ้อยคำสุภาพหน่อยนะครับ");
+  }
+
+  if (user.badWordCount === 2) {
+    return reply(event, "⚠️ เตือนอีกครั้งนะครับ ผมอยากช่วยคุณด้วยภาษาที่สุภาพ");
+  }
+
+  return reply(event, "🚫 ขออภัยครับ ผมไม่สามารถตอบข้อความลักษณะนี้ได้");
+}
 
   // ====================================
   // CHANGE COMMANDS (จากโค้ดที่แข็งกว่า)
