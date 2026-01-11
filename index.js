@@ -158,9 +158,6 @@ async function handleEvent(event) {
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
     return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
 
-  if (hasBadWord(text)) {
-  user.badCount = (user.badCount || 0) + 1;
-
   if (user.badCount >= 3) {
     user.blockedUntil = moment().add(1, "minute");
     user.badCount = 0;
@@ -262,8 +259,10 @@ if (hasBadWord(text)) {
     if (!isHumanName(text, 1, 15))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
-    // กรณีมีแนวโน้มว่าสลับชื่อ
-  if (nickName.length > realName.length + 3) {
+    const nickName = text;
+    const realName = user.realName;
+
+  if (looksSwapped(realName, nickName)) {
     user.realName = "";
     user.nickName = "";
     user.step = "ask_realname";
@@ -414,7 +413,6 @@ if (hasBadWord(text)) {
   } catch {
     return reply(event, "ขออภัยครับ ผมยังไม่เข้าใจคำถามนี้ 🙏");
   }
-}
 
 // ========================================
 // HELPER
