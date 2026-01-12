@@ -398,24 +398,18 @@ if (looksSwapped(realName, nickName)) {
   // ====================================
   // AI FALLBACK (ปลอดภัย)
   // ====================================
-  try {
-    const controller = new AbortController();
-setTimeout(() => controller.abort(), 6000);
-
-const res = await openai.chat.completions.create({
-  model: "gpt-4o-mini",
-  messages: [
-    { role: "system", content: "คุณคือแชทบอทสุภาพ ห้ามเดาข้อมูล" },
-    { role: "user", content: text },
-  ],
-  max_tokens: 200,
-  signal: controller.signal
-});
-
+   try {
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "คุณคือแชทบอทสุภาพ ห้ามเดาข้อมูล" },
+        { role: "user", content: text },
+      ],
+      max_tokens: 200,
+    });
     return reply(event, res.choices[0].message.content);
   } catch {
-    return reply(event, "🤖 ระบบ AI ตอบช้าไปนิด ขออภัยด้วยครับ");
-
+    return reply(event, "ขออภัยครับ ผมยังไม่เข้าใจคำถามนี้ 🙏");
   }
 }
 
