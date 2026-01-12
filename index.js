@@ -122,6 +122,53 @@ function hasBadWord(text) {
 }
 
 // ========================================
+// TEXT NORMALIZE (ANTI EVASION)
+// ========================================
+function normalizeText(text) {
+  return text
+    .toLowerCase()
+    .replace(/[\s\W_]+/g, "")     // ลบช่องว่าง & สัญลักษณ์
+    .replace(/(.)\1{2,}/g, "$1"); // ควยยย → ควย
+}
+
+// ========================================
+// BAD WORD PATTERNS (REGEX BASED)
+// ========================================
+const BAD_PATTERNS = [
+  /ค+ว+ย+/,
+  /เห+ี+้*ย+/,
+  /ส+ั+ส+/,
+  /ห+ี+/,
+  /ช+ิ+บ+ห+า+ย+/,
+  /เย+็+ด+/,
+  /fuck+/i,
+  /f+u+c+k+/i,
+  /shit+/i,
+  /bitch+/i,
+  /asshole+/i
+];
+
+function containsBadWord(text) {
+  const clean = normalizeText(text);
+  return BAD_PATTERNS.some(pattern => pattern.test(clean));
+}
+
+function looksOffensive(text) {
+  const clean = normalizeText(text);
+
+  // มีคำหยาบตรง ๆ
+  if (containsBadWord(clean)) return true;
+
+  // สั้นมาก + อารมณ์แรง
+  if (clean.length <= 4 && /[!@#$%^&*]/.test(text)) return true;
+
+  // ไม่มีตัวอักษรเลย (ด่า / spam)
+  if (!/[ก-๙a-z]/i.test(text)) return true;
+
+  return false;
+}
+
+// ========================================
 // WEBHOOK
 // ========================================
 app.post("/webhook", line.middleware(config), async (req, res) => {
@@ -152,9 +199,6 @@ async function handleEvent(event) {
   if (!users[userId]) {
     users[userId] = {
       step: "ask_realname",
-      badWordCount: 0,
-      badCount: 0,
-      blockedUntil: null
     };
     saveUsers();
     return reply(
@@ -164,6 +208,29 @@ async function handleEvent(event) {
   }
 
   const user = users[userId];
+
+  // ====================================
+// GLOBAL BAD WORD FILTER (ONE TIME)
+// ====================================
+if (looksOffensive(text)) {
+  user.badCount = (user.badCount || 0) + 1;
+  saveUsers();
+
+  if (user.badCount >= 3) {
+    user.blockedUntil = moment().add(1, "minute");
+    user.badCount = 0;
+    saveUsers();
+    return reply(
+      event,
+      "⛔ ตรวจพบคำไม่สุภาพหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
+    );
+  }
+
+  return reply(
+    event,
+    `⚠️ กรุณาใช้ถ้อยคำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
+  );
+}
 
   // ===== spam / garbage =====
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
@@ -177,26 +244,6 @@ async function handleEvent(event) {
     `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
   );
 }
-
-  if (hasBadWord(text)) {
-    user.badCount = (user.badCount || 0) + 1;
-
-    if (user.badCount >= 3) {
-      user.blockedUntil = moment().add(1, "minute");
-      user.badCount = 0;
-      saveUsers();
-      return reply(
-        event,
-        "⛔ ตรวจพบคำไม่เหมาะสมซ้ำหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
-      );
-    }
-
-    saveUsers();
-    return reply(
-      event,
-      `⚠️ กรุณาใช้คำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
-    );
-  }
 
   // ====================================
   // CHANGE COMMANDS (จากโค้ดที่แข็งกว่า)
@@ -265,8 +312,15 @@ if (user.step === "ask_nickname") {
     );
   }
 
-    const nickName = text;
+const nickName = text;
 const realName = user.realName;
+
+if (nickName === realName) {
+  return reply(
+    event,
+    "⚠️ ชื่อเล่นไม่ควรเหมือนชื่อจริง\nกรุณาพิมพ์ชื่อเล่นใหม่ครับ"
+  );
+}
 
 if (looksSwapped(realName, nickName)) {
   user.realName = "";
