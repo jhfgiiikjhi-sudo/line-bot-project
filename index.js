@@ -210,9 +210,12 @@ async function handleEvent(event) {
   const user = users[userId];
 
   // ====================================
-// GLOBAL BAD WORD FILTER (ONE TIME)
+// GLOBAL BAD WORD FILTER (SAFE VERSION)
 // ====================================
-if (looksOffensive(text)) {
+if (
+  looksOffensive(text) &&
+  user.step !== "ask_age"
+) {
   user.badCount = (user.badCount || 0) + 1;
   saveUsers();
 
