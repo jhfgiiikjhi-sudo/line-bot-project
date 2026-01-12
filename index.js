@@ -108,8 +108,8 @@ function isLikelyNickname(text) {
 // ADD: BAD WORD FILTER (PATCH ONLY)
 // ========================================
 const BAD_WORDS = [
-  "ควย","เหี้ย","สัส","ห่า","หี","ชิบหาย","ฉิบหาย",
-  "fuck","shit","bitch","asshole","motherfucker"
+  "ควย","เหี้ย","สัส","ห่า","หี","ชิบหาย","ฉิบหาย", "เย็ด" ,"น่าหี" ,"ลูกกะหรี่",
+  "fuck","shit","bitch","asshole","motherfucker" ,"Hee","Fuckyou" ,"Kuy" ,"yed" 
 ];
 
 function normalizeBadWord(text) {
