@@ -112,12 +112,6 @@ const BAD_WORDS = [
   "fuck","shit","bitch","asshole","motherfucker"
 ];
 
-function hasBadWord(text) {
-  const clean = text.replace(/\s+/g, "").toLowerCase();
-  return BAD_WORDS.some(w => clean.includes(w));
-}
-
-// ลบช่องว่าง เช่น "ค ว ย" → "ควย"
 function normalizeBadWord(text) {
   return text.toLowerCase().replace(/\s+/g, "");
 }
@@ -154,59 +148,26 @@ async function handleEvent(event) {
   const lower = text.toLowerCase();
   const now = moment().tz("Asia/Bangkok").locale("th");
 
-  // ===== spam / garbage =====
-  if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
-    return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
-
-  if (hasBadWord(text)) {
-  user.badCount = (user.badCount || 0) + 1;
-
-  if (user.badCount >= 3) {
-    user.blockedUntil = moment().add(1, "minute");
-    user.badCount = 0;
+  // ===== create user =====
+  if (!users[userId]) {
+    users[userId] = {
+      step: "ask_realname",
+      badWordCount: 0,
+      badCount: 0,
+      blockedUntil: null
+    };
     saveUsers();
     return reply(
       event,
-      "⛔ ตรวจพบคำไม่เหมาะสมซ้ำหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
+      "สวัสดีครับ ก่อนเริ่มคุยกันผมขอทำความรู้จักคุณหน่อยนะครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ"
     );
-  }
-
-  saveUsers();
-  return reply(
-    event,
-    `⚠️ กรุณาใช้คำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
-  );
-  }
-  
-  // ===== create user =====
-  if (!users[userId]) {
-    users[userId] = { step: "ask_realname", badWordCount: 0 };
-    saveUsers();
-    return reply(event, "สวัสดีครับ ก่อนเริ่มคุยกันผมขอทำความรู้จักคุณหน่อยนะครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ");
   }
 
   const user = users[userId];
 
-  badCount: 0
-    blockedUntil: null
-
-  // ====================================
-// ADD: BAD WORD HANDLER (PATCH ONLY)
-// ====================================
-if (hasBadWord(text)) {
-  user.badWordCount = (user.badWordCount || 0) + 1;
-  saveUsers();
-
-  if (user.badWordCount === 1) {
-    return reply(event, "⚠️ ขอความร่วมมือใช้ถ้อยคำสุภาพหน่อยนะครับ");
-  }
-
-  if (user.badWordCount === 2) {
-    return reply(event, "⚠️ เตือนอีกครั้งนะครับ ผมอยากช่วยคุณด้วยภาษาที่สุภาพ");
-  }
-
-  return reply(event, "🚫 ขออภัยครับ ผมไม่สามารถตอบข้อความลักษณะนี้ได้");
-}
+  // ===== spam / garbage =====
+  if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
+    return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
 
   // ====================================
   if (user.blockedUntil && moment().isBefore(user.blockedUntil)) {
@@ -216,6 +177,26 @@ if (hasBadWord(text)) {
     `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
   );
 }
+
+  if (hasBadWord(text)) {
+    user.badCount = (user.badCount || 0) + 1;
+
+    if (user.badCount >= 3) {
+      user.blockedUntil = moment().add(1, "minute");
+      user.badCount = 0;
+      saveUsers();
+      return reply(
+        event,
+        "⛔ ตรวจพบคำไม่เหมาะสมซ้ำหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
+      );
+    }
+
+    saveUsers();
+    return reply(
+      event,
+      `⚠️ กรุณาใช้คำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
+    );
+  }
 
   // ====================================
   // CHANGE COMMANDS (จากโค้ดที่แข็งกว่า)
@@ -243,7 +224,11 @@ if (hasBadWord(text)) {
   // ====================================
   if (user.step === "ask_realname") {
     if (lower === "ข้าม")
-      return reply(event, "❌ ไม่สามารถข้ามชื่อจริงได้");
+      return reply(
+        event,
+        "❌ ไม่สามารถข้ามชื่อจริงได้\n" +
+        "กรุณาพิมพ์ชื่อจริงของคุณ เช่น สมชาย, John"
+);
 
     if (!isHumanName(text, 2, 20))
       return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง");
@@ -262,12 +247,24 @@ if (hasBadWord(text)) {
     if (!isHumanName(text, 1, 15))
       return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
 
-    // กรณีมีแนวโน้มว่าสลับชื่อ
-  if (nickName.length > realName.length + 3) {
-    user.realName = "";
-    user.nickName = "";
-    user.step = "ask_realname";
-      saveUsers();
+    // 🔔 จุดเตือนสำคัญ (ใช้ isLikelyNickname)
+  if (!isLikelyNickname(text)) {
+    return reply(
+      event,
+      "⚠️ ชื่อเล่นมักจะสั้นกว่านี้นะครับ\n" +
+      "ถ้านี่คือชื่อเล่นจริง ๆ ให้พิมพ์ซ้ำอีกครั้งได้เลย 😊"
+    );
+  }
+
+    const nickName = text;
+const realName = user.realName;
+
+if (looksSwapped(realName, nickName)) {
+  user.realName = "";
+  user.nickName = "";
+  user.step = "ask_realname";
+  user.swapDetected = true;
+  saveUsers();
 
   return reply(
     event,
@@ -402,17 +399,23 @@ if (hasBadWord(text)) {
   // AI FALLBACK (ปลอดภัย)
   // ====================================
   try {
-    const res = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "คุณคือแชทบอทสุภาพ ห้ามเดาข้อมูล" },
-        { role: "user", content: text },
-      ],
-      max_tokens: 200,
-    });
+    const controller = new AbortController();
+setTimeout(() => controller.abort(), 6000);
+
+const res = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    { role: "system", content: "คุณคือแชทบอทสุภาพ ห้ามเดาข้อมูล" },
+    { role: "user", content: text },
+  ],
+  max_tokens: 200,
+  signal: controller.signal
+});
+
     return reply(event, res.choices[0].message.content);
   } catch {
-    return reply(event, "ขออภัยครับ ผมยังไม่เข้าใจคำถามนี้ 🙏");
+    return reply(event, "🤖 ระบบ AI ตอบช้าไปนิด ขออภัยด้วยครับ");
+
   }
 }
 
