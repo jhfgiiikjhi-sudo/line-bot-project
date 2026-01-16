@@ -160,26 +160,25 @@ function containsBadWord(text) {
   return BAD_PATTERNS.some(pattern => pattern.test(clean));
 }
 
-function looksOffensive(text) {
+function detectMessageType(text) {
   const clean = normalizeText(text);
 
-  // ❌ ถ้าเป็นตัวเลขล้วน ไม่ถือว่าไม่สุภาพ
-  if (/^\d+$/.test(clean)) return false;
+  // ตัวเลขล้วน / วันเกิด = ปกติ
+  if (/^\d+$/.test(clean)) return "normal";
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return "normal";
 
-  // ❌ ถ้าเป็นวันเกิดรูปแบบ DD/MM/YYYY
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return false;
+  // คำหยาบ
+  if (containsBadWord(clean)) return "badword";
 
-  // ✅ ดักคำหยาบ (หลัง normalize แล้ว)
-  if (containsBadWord(clean)) return true;
+  // สแปม (ไม่มีตัวอักษรเลย)
+  if (!/[ก-๙a-z]/i.test(text)) return "spam";
 
-  // ✅ ไม่มีตัวอักษรเลย (???? !!!!!)
-  if (!/[ก-๙a-z]/i.test(text)) return true;
+  // อักษรซ้ำมั่ว
+  if (/^(.)\1{4,}$/.test(clean)) return "spam";
 
-  // ✅ สั้นผิดปกติ + สัญลักษณ์แรง
-  if (clean.length <= 3 && /[!@#$%^&*]/.test(text)) return true;
-
-  return false;
+  return "normal";
 }
+
 
 // ========================================
 // WEBHOOK
@@ -234,12 +233,10 @@ async function handleEvent(event) {
   // ====================================
 // GLOBAL BAD WORD FILTER (SAFE VERSION)
 // ====================================
-const ALLOW_NUMBER_ONLY_STEPS = ["ask_age"];
+const msgType = detectMessageType(text);
 
-if (
-  looksOffensive(text) &&
-  !ALLOW_NUMBER_ONLY_STEPS.includes(user.step)
-) {
+// ===== GLOBAL CONTROL =====
+if (msgType !== "normal") {
   user.badCount = (user.badCount || 0) + 1;
   saveUsers();
 
@@ -249,16 +246,24 @@ if (
     saveUsers();
     return reply(
       event,
-      "⛔ ตรวจพบคำไม่สุภาพหลายครั้ง\nระบบระงับการใช้งาน 1 นาที"
+      "⛔ ระบบตรวจพบข้อความไม่เหมาะสมซ้ำหลายครั้ง\nระงับการใช้งาน 1 นาที"
     );
   }
 
-  return reply(
-    event,
-    `⚠️ กรุณาใช้ถ้อยคำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
-  );
-}
+  if (msgType === "spam") {
+    return reply(
+      event,
+      `⚠️ ข้อความลักษณะสแปม หรือไม่เป็นคำถาม\n(เตือนครั้งที่ ${user.badCount}/3)`
+    );
+  }
 
+  if (msgType === "badword") {
+    return reply(
+      event,
+      `⚠️ กรุณาใช้ถ้อยคำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
+    );
+  }
+}
 
   // ===== spam / garbage =====
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
@@ -296,8 +301,12 @@ if (
       "กรุณาพิมพ์ชื่อจริงของคุณ เช่น สมชาย, John"
     );
 
-  if (!isHumanName(text, 2, 20))
-    return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง");
+  if (!isHumanName(text, 2, 20)) {
+  if (detectMessageType(text) === "badword")
+    return reply(event, "❌ ชื่อจริงไม่ควรมีคำไม่สุภาพ");
+
+  return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง");
+}
 
   user.realName = text;
   user.step = "ask_nickname";
@@ -310,8 +319,12 @@ if (user.step === "ask_nickname") {
   if (lower === "ข้าม")
     return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
 
-  if (!isHumanName(text, 1, 15))
-    return reply(event, "❌ ชื่อเล่นไม่ถูกต้อง");
+  if (!isHumanName(text, 1, 15)) {
+  if (detectMessageType(text) === "badword")
+    return reply(event, "❌ ชื่อเล่นควรเป็นคำสุภาพและเหมาะสม");
+
+  return reply(event, "❌ รูปแบบชื่อเล่นไม่ถูกต้อง");
+}
 
   // 🔴 จุดที่เพิ่มเข้ามา (ห้ามย้ายตำแหน่ง)
   if (text === user.realName) {
@@ -363,8 +376,12 @@ if (looksSwapped(realName, nickName)) {
 
   if (user.step === "ask_age") {
     const age = Number(text);
-    if (!Number.isInteger(age) || age < 1 || age > 60)
-      return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลข 1–60");
+    if (!Number.isInteger(age) || age < 1 || age > 60) {
+  if (detectMessageType(text) === "badword")
+    return reply(event, "❌ อายุไม่ควรใช้คำไม่สุภาพ");
+
+  return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลขระหว่าง 1–60");
+}
 
     user.age = age;
     user.step = "ask_birthday";
@@ -475,6 +492,10 @@ if (looksSwapped(realName, nickName)) {
       event,
       `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`
     );
+
+  if (detectMessageType(text) === "badword") {
+  return reply(event, "ผมไม่สามารถตอบคำถามที่ไม่สุภาพได้");
+}
 
   // ====================================
   // AI FALLBACK (ปลอดภัย)
