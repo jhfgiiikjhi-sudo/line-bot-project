@@ -69,6 +69,7 @@ const validThaiEng = (t, min, max) =>
 // ตรวจชื่อคนจริง (ไทย / อังกฤษ)
 function isHumanName(text, min, max) {
   if (!validThaiEng(text, min, max)) return false;
+  if (looksOffensive(text)) return false;
   if (isForbidden(text) || isRepeated(text)) return false;
 
   // ไทยต้องมีสระ
@@ -210,11 +211,22 @@ async function handleEvent(event) {
   const user = users[userId];
 
   // ====================================
+  if (user.blockedUntil && moment().isBefore(user.blockedUntil)) {
+  const diff = moment(user.blockedUntil).diff(moment(), "seconds");
+  return reply(
+    event,
+    `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
+  );
+}
+
+  // ====================================
 // GLOBAL BAD WORD FILTER (SAFE VERSION)
 // ====================================
+const ALLOW_NUMBER_ONLY_STEPS = ["ask_age"];
+
 if (
   looksOffensive(text) &&
-  user.step !== "ask_age"
+  !ALLOW_NUMBER_ONLY_STEPS.includes(user.step)
 ) {
   user.badCount = (user.badCount || 0) + 1;
   saveUsers();
@@ -235,18 +247,10 @@ if (
   );
 }
 
+
   // ===== spam / garbage =====
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
     return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
-
-  // ====================================
-  if (user.blockedUntil && moment().isBefore(user.blockedUntil)) {
-  const diff = moment(user.blockedUntil).diff(moment(), "seconds");
-  return reply(
-    event,
-    `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
-  );
-}
 
   // ====================================
   // CHANGE COMMANDS (จากโค้ดที่แข็งกว่า)
