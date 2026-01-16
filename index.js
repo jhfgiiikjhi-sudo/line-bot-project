@@ -137,16 +137,22 @@ function normalizeText(text) {
 // ========================================
 const BAD_PATTERNS = [
   /ค+ว+ย+/,
+  /ค+_+ว+_+ย+/,
+  /ค+\s*ว+\s*ย+/,
+
   /เห+ี+้*ย+/,
   /ส+ั+ส+/,
   /ห+ี+/,
   /ช+ิ+บ+ห+า+ย+/,
   /เย+็+ด+/,
-  /fuck+/i,
+
   /f+u+c+k+/i,
-  /shit+/i,
-  /bitch+/i,
-  /asshole+/i
+  /s+h+i+t+/i,
+  /b+i+t+c+h+/i,
+  /a+s+s+h+o+l+e+/i,
+  /h+e+e+/i,
+  /k+u+y+/i,
+  /y+e+d+/i
 ];
 
 function containsBadWord(text) {
@@ -157,14 +163,20 @@ function containsBadWord(text) {
 function looksOffensive(text) {
   const clean = normalizeText(text);
 
-  // มีคำหยาบตรง ๆ
+  // ❌ ถ้าเป็นตัวเลขล้วน ไม่ถือว่าไม่สุภาพ
+  if (/^\d+$/.test(clean)) return false;
+
+  // ❌ ถ้าเป็นวันเกิดรูปแบบ DD/MM/YYYY
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return false;
+
+  // ✅ ดักคำหยาบ (หลัง normalize แล้ว)
   if (containsBadWord(clean)) return true;
 
-  // สั้นมาก + อารมณ์แรง
-  if (clean.length <= 4 && /[!@#$%^&*]/.test(text)) return true;
-
-  // ไม่มีตัวอักษรเลย (ด่า / spam)
+  // ✅ ไม่มีตัวอักษรเลย (???? !!!!!)
   if (!/[ก-๙a-z]/i.test(text)) return true;
+
+  // ✅ สั้นผิดปกติ + สัญลักษณ์แรง
+  if (clean.length <= 3 && /[!@#$%^&*]/.test(text)) return true;
 
   return false;
 }
