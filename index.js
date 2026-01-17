@@ -23,17 +23,19 @@ const NAME_STATS_FILE = "./name_stats.json";
 let users = {};
 let nameStats = { real: {}, nick: {} };
 
-if (fs.existsSync(USERS_FILE)) {
-  try { users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8")); } catch {}
-}
-if (fs.existsSync(NAME_STATS_FILE)) {
-  try { nameStats = JSON.parse(fs.readFileSync(NAME_STATS_FILE, "utf8")); } catch {}
-}
+// โหลดข้อมูลแบบกัน Error
+const loadData = () => {
+    try {
+        if (fs.existsSync(USERS_FILE)) users = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+        if (fs.existsSync(NAME_STATS_FILE)) nameStats = JSON.parse(fs.readFileSync(NAME_STATS_FILE, "utf8"));
+    } catch (e) {
+        console.error("Error loading data:", e);
+    }
+};
+loadData();
 
-const saveUsers = () =>
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-const saveStats = () =>
-  fs.writeFileSync(NAME_STATS_FILE, JSON.stringify(nameStats, null, 2));
+const saveUsers = () => fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+const saveStats = () => fs.writeFileSync(NAME_STATS_FILE, JSON.stringify(nameStats, null, 2));
 
 // ========================================
 // LINE CONFIG
@@ -69,7 +71,7 @@ const validThaiEng = (t, min, max) =>
 // ตรวจชื่อคนจริง (ไทย / อังกฤษ)
 function isHumanName(text, min, max) {
   if (!validThaiEng(text, min, max)) return false;
-  if (looksOffensive(text)) return false;
+  // ลบบรรทัด looksOffensive ออกเพราะไม่มีฟังก์ชันรองรับ
   if (isForbidden(text) || isRepeated(text)) return false;
 
   // ไทยต้องมีสระ
@@ -128,8 +130,8 @@ function hasBadWord(text) {
 function normalizeText(text) {
   return text
     .toLowerCase()
-    .replace(/[\s\W_]+/g, "")     // ลบช่องว่าง & สัญลักษณ์
-    .replace(/(.)\1{2,}/g, "$1"); // ควยยย → ควย
+    .replace(/\s+/g, "")       // ลบช่องว่าง
+    .replace(/[_\-\.]/g, "")   // ลบ _ - .
 }
 
 // ========================================
@@ -172,13 +174,22 @@ function detectMessageType(text) {
 
   // สแปม (ไม่มีตัวอักษรเลย)
   if (!/[ก-๙a-z]/i.test(text)) return "spam";
-
-  // อักษรซ้ำมั่ว
-  if (/^(.)\1{4,}$/.test(clean)) return "spam";
-
-  return "normal";
+}
+  // ย้ายออกมาไว้นอก detectMessageType
+function isSpam(text) {
+  if (/^[!?@#\$%\^&\*\(\)\+=\-_.]{3,}$/.test(text)) return true;
+  if (/^(.)\1{4,}$/.test(text)) return true;
+  return false;
 }
 
+function detectMessageType(text) {
+  const clean = normalizeText(text);
+  if (/^\d+$/.test(clean)) return "normal";
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return "normal";
+  if (containsBadWord(clean)) return "badword";
+  if (!/[ก-๙a-z]/i.test(text) || isSpam(text)) return "spam";
+  return "normal";
+}
 
 // ========================================
 // WEBHOOK
@@ -194,7 +205,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 });
 
 // ========================================
-// MAIN LOGIC
+// MAIN LOGIC - รวมร่างสมบูรณ์ (Logic ครบทุกบรรทัด)
 // ========================================
 async function handleEvent(event) {
   if (event.type !== "message" || event.message.type !== "text")
@@ -207,245 +218,147 @@ async function handleEvent(event) {
   const lower = text.toLowerCase();
   const now = moment().tz("Asia/Bangkok").locale("th");
 
-  // ===== create user =====
+  // ===== 1. CREATE USER / INITIAL CHECK =====
   if (!users[userId]) {
-    users[userId] = {
-      step: "ask_realname",
-    };
+    users[userId] = { step: "ask_realname", badCount: 0 };
     saveUsers();
-    return reply(
-      event,
-      "สวัสดีครับ ก่อนเริ่มคุยกันผมขอทำความรู้จักคุณหน่อยนะครับ 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณ"
-    );
+    return reply(event, "สวัสดีครับ ผมคือ STC Bot ก่อนเริ่มคุยกัน 😊\nกรุณาพิมพ์ **ชื่อจริง** ของคุณก่อนนะครับ");
   }
 
   const user = users[userId];
 
-  // ====================================
+  // ===== 2. BLOCKED CHECK =====
   if (user.blockedUntil && moment().isBefore(user.blockedUntil)) {
-  const diff = moment(user.blockedUntil).diff(moment(), "seconds");
-  return reply(
-    event,
-    `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`
-  );
-}
+    const diff = moment(user.blockedUntil).diff(moment(), "seconds");
+    return reply(event, `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`);
+  }
 
-  // ====================================
-// GLOBAL BAD WORD FILTER (SAFE VERSION)
-// ====================================
-const msgType = detectMessageType(text);
-
-// ===== GLOBAL CONTROL =====
-if (msgType !== "normal") {
-  user.badCount = (user.badCount || 0) + 1;
-  saveUsers();
-
-  if (user.badCount >= 3) {
-    user.blockedUntil = moment().add(1, "minute");
-    user.badCount = 0;
+  // ===== 3. GLOBAL BAD WORD & SPAM FILTER =====
+  const msgType = detectMessageType(text);
+  if (msgType !== "normal") {
+    user.badCount = (user.badCount || 0) + 1;
     saveUsers();
-    return reply(
-      event,
-      "⛔ ระบบตรวจพบข้อความไม่เหมาะสมซ้ำหลายครั้ง\nระงับการใช้งาน 1 นาที"
-    );
+
+    if (user.badCount >= 3) {
+      user.blockedUntil = moment().add(1, "minute");
+      user.badCount = 0;
+      saveUsers();
+      return reply(event, "⛔ ระบบตรวจพบข้อความไม่เหมาะสมซ้ำหลายครั้ง\nระงับการใช้งาน 1 นาที");
+    }
+
+    if (isSpam(text)) {
+      return reply(event, "⚠️ ข้อความลักษณะสแปมหรือไม่สื่อความหมาย กรุณาพิมพ์ให้ชัดเจนครับ");
+    }
+
+    if (hasBadWord(text)) {
+      increaseWarning(userId);
+      return reply(event, `⚠️ ❌ ข้อความนี้มีถ้อยคำไม่เหมาะสม กรุณาใช้คำสุภาพครับ\n(เตือนครั้งที่ ${user.badCount}/3)`);
+    }
   }
 
-  if (msgType === "spam") {
-    return reply(
-      event,
-      `⚠️ ข้อความลักษณะสแปม หรือไม่เป็นคำถาม\n(เตือนครั้งที่ ${user.badCount}/3)`
-    );
-  }
-
-  if (msgType === "badword") {
-    return reply(
-      event,
-      `⚠️ กรุณาใช้ถ้อยคำสุภาพ\n(เตือนครั้งที่ ${user.badCount}/3)`
-    );
-  }
-}
-
-  // ===== spam / garbage =====
+  // ===== 4. LENGTH & GARBAGE CHECK =====
   if (text.length > 50 || /^[^ก-๙a-zA-Z0-9\s]+$/.test(text))
     return reply(event, "❌ ข้อความไม่ถูกต้องครับ");
 
-  // ====================================
-  // CHANGE COMMANDS (จากโค้ดที่แข็งกว่า)
-  // ====================================
+  // ===== 5. CHANGE COMMANDS =====
   if (lower.includes("เปลี่ยนชื่อเล่น")) {
     user.step = "ask_nickname";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อเล่นใหม่");
   }
-
   if (lower.includes("เปลี่ยนชื่อ")) {
     user.step = "ask_realname";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์ชื่อจริงใหม่");
   }
-
   if (lower.includes("เปลี่ยนอายุ")) {
     user.step = "ask_age";
     saveUsers();
     return reply(event, "ได้เลยครับ 😊\nกรุณาพิมพ์อายุของคุณ");
   }
 
-  // ====================================
-  // REGISTER FLOW (แข็ง + ครบ)
-  // ====================================
+  // ===== 6. REGISTER FLOW (CORE LOGIC) =====
+  
+  // STEP: ASK REALNAME
   if (user.step === "ask_realname") {
-  if (lower === "ข้าม")
-    return reply(
-      event,
-      "❌ ไม่สามารถข้ามชื่อจริงได้\n" +
-      "กรุณาพิมพ์ชื่อจริงของคุณ เช่น สมชาย, John"
-    );
-
-  if (!isHumanName(text, 2, 20)) {
-  if (detectMessageType(text) === "badword")
-    return reply(event, "❌ ชื่อจริงไม่ควรมีคำไม่สุภาพ");
-
-  return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง");
-}
-
-  user.realName = text;
-  user.step = "ask_nickname";
-  saveUsers();
-
-  return reply(event, `ขอบคุณครับ ${text} 😊\nขอทราบ **ชื่อเล่น** ด้วยครับ`);
-}
-
-if (user.step === "ask_nickname") {
-  if (lower === "ข้าม")
-    return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
-
-  if (!isHumanName(text, 1, 15)) {
-  if (detectMessageType(text) === "badword")
-    return reply(event, "❌ ชื่อเล่นควรเป็นคำสุภาพและเหมาะสม");
-
-  return reply(event, "❌ รูปแบบชื่อเล่นไม่ถูกต้อง");
-}
-
-  // 🔴 จุดที่เพิ่มเข้ามา (ห้ามย้ายตำแหน่ง)
-  if (text === user.realName) {
-    return reply(
-      event,
-      "⚠️ ชื่อเล่นไม่ควรซ้ำกับชื่อจริง\n" +
-      "กรุณาพิมพ์ชื่อเล่นใหม่ครับ 🙂"
-    );
+    if (lower === "ข้าม") return reply(event, "❌ ไม่สามารถข้ามชื่อจริงได้\nกรุณาพิมพ์ชื่อจริงของคุณ เช่น สมชาย, John");
+    if (!isHumanName(text, 2, 20)) {
+      if (detectMessageType(text) === "badword") return reply(event, "❌ ชื่อจริงไม่ควรมีคำไม่สุภาพ");
+      return reply(event, "❌ กรุณาพิมพ์ชื่อจริงที่เป็นชื่อคนจริง");
+    }
+    user.realName = text;
+    user.step = "ask_nickname";
+    saveUsers();
+    return reply(event, `ขอบคุณครับ ${text} 😊\nขอทราบ **ชื่อเล่น** ด้วยครับ`);
   }
 
-    // 🔔 จุดเตือนสำคัญ (ใช้ isLikelyNickname)
-  if (!isLikelyNickname(text)) {
-    return reply(
-      event,
-      "⚠️ ชื่อเล่นมักจะสั้นกว่านี้นะครับ\n" +
-      "ถ้านี่คือชื่อเล่นจริง ๆ ให้พิมพ์ซ้ำอีกครั้งได้เลย 😊"
-    );
-  }
+  // STEP: ASK NICKNAME
+  if (user.step === "ask_nickname") {
+    if (lower === "ข้าม") return reply(event, "❌ ไม่สามารถข้ามชื่อเล่นได้");
+    if (!isHumanName(text, 1, 15)) {
+      if (detectMessageType(text) === "badword") return reply(event, "❌ ชื่อที่พิมพ์มีความหมายไม่เหมาะสม กรุณาใช้ชื่อสุภาพครับ");
+      return reply(event, "❌ ชื่อไม่ควรมีตัวเลขหรือสัญลักษณ์พิเศษครับ");
+    }
+    if (text === user.realName) return reply(event, "⚠️ ชื่อเล่นไม่ควรซ้ำกับชื่อจริง\nกรุณาพิมพ์ชื่อเล่นใหม่ครับ 🙂");
+    
+    // จุดเตือน Nickname ยาว (isLikelyNickname)
+    if (!isLikelyNickname(text)) {
+      return reply(event, "⚠️ ชื่อเล่นมักจะสั้นกว่านี้นะครับ\nถ้านี่คือชื่อเล่นจริง ๆ ให้พิมพ์ซ้ำอีกครั้งได้เลย 😊");
+    }
 
-const nickName = text;
-const realName = user.realName;
-
-if (nickName === realName) {
-  return reply(
-    event,
-    "⚠️ ชื่อเล่นไม่ควรเหมือนชื่อจริง\nกรุณาพิมพ์ชื่อเล่นใหม่ครับ"
-  );
-}
-
-if (looksSwapped(realName, nickName)) {
-  user.realName = "";
-  user.nickName = "";
-  user.step = "ask_realname";
-  user.swapDetected = true;
-  saveUsers();
-
-  return reply(
-    event,
-    "⚠️ ดูเหมือนคุณอาจใส่ **ชื่อจริงและชื่อเล่นสลับกัน**\n" +
-    "กรุณาพิมพ์ **ชื่อจริง** ใหม่อีกครั้งครับ"
-  );
-}
+    // ตรวจสอบการสลับชื่อ (looksSwapped)
+    if (looksSwapped(user.realName, text)) {
+      user.realName = "";
+      user.step = "ask_realname";
+      user.swapDetected = true;
+      saveUsers();
+      return reply(event, "⚠️ ดูเหมือนคุณอาจใส่ **ชื่อจริงและชื่อเล่นสลับกัน**\nกรุณาพิมพ์ **ชื่อจริง** ใหม่อีกครั้งครับ");
+    }
 
     user.nickName = text;
-  user.step = "ask_age";
-  saveUsers();
-  return reply(event, "ต่อไปขอทราบอายุของคุณครับ 🎂");
-}
-
-  if (user.step === "ask_age") {
-    const age = Number(text);
-    if (!Number.isInteger(age) || age < 1 || age > 60) {
-  if (detectMessageType(text) === "badword")
-    return reply(event, "❌ อายุไม่ควรใช้คำไม่สุภาพ");
-
-  return reply(event, "❌ กรุณาพิมพ์อายุเป็นตัวเลขระหว่าง 1–60");
-}
-
-    user.age = age;
-    user.step = "ask_birthday";
+    user.step = "ask_age";
     saveUsers();
-
-    return reply(
-      event,
-      'ต้องการบอกวันเกิดไหมครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ "ข้าม"'
-    );
+    return reply(event, "ต่อไปขอทราบอายุของคุณครับ 🎂");
   }
 
+  // STEP: ASK AGE
+  if (user.step === "ask_age") {
+    const ageInput = parseInt(text);
+    if (hasBadWord(text)) return reply(event, "❌ ไม่สามารถใช้อายุเป็นคำไม่สุภาพได้");
+    if (isNaN(ageInput) || ageInput < 1 || ageInput > 60) return reply(event, "❌ อายุควรเป็นตัวเลขระหว่าง 1 ถึง 60 ปี");
+    
+    user.age = ageInput;
+    user.step = "ask_birthday";
+    saveUsers();
+    return reply(event, 'ต้องการบอกวันเกิดไหมครับ?\nตัวอย่าง: 20/11/2548\nหรือพิมพ์ "ข้าม"');
+  }
+
+  // STEP: ASK BIRTHDAY & FINISH
   if (user.step === "ask_birthday") {
     if (lower === "ข้าม") {
       user.birthday = null;
     } else {
-      if (!moment(text, "DD/MM/YYYY", true).isValid())
-        return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง");
+      if (!moment(text, "DD/MM/YYYY", true).isValid()) return reply(event, "❌ รูปแบบวันเกิดไม่ถูกต้อง");
       user.birthday = text;
     }
 
-    if (looksSwapped(user.realName, user.nickName)) {
-      user.step = "ask_realname";
-  saveUsers();
-      return reply(
-      event,
-      "⚠️ ดูเหมือนคุณอาจใส่ชื่อจริงและชื่อเล่นสลับกัน\nกรุณาพิมพ์ **ชื่อจริง** ใหม่อีกครั้งครับ"
-    );
-}
-
     user.step = "done";
-
-    nameStats.real[user.realName] =
-      (nameStats.real[user.realName] || 0) + 1;
-    nameStats.nick[user.nickName] =
-      (nameStats.nick[user.nickName] || 0) + 1;
-
+    // เก็บสถิติยอดนิยม
+    nameStats.real[user.realName] = (nameStats.real[user.realName] || 0) + 1;
+    nameStats.nick[user.nickName] = (nameStats.nick[user.nickName] || 0) + 1;
+    
     saveUsers();
     saveStats();
-
-    return reply(
-      event,
-      `✅ ลงทะเบียนสำเร็จ\n\n👤 ${user.realName}\n🎭 ${user.nickName}\n🎂 อายุ ${user.age} ปี`
-    );
+    return reply(event, `✅ ลงทะเบียนสำเร็จ\n\n👤 ${user.realName}\n🎭 ${user.nickName}\n🎂 อายุ ${user.age} ปี`);
   }
 
-  // ====================================
-  // MULTI INTENT (จากโค้ดแรก)
-  // ====================================
+  // ===== 7. MULTI INTENT (TIME/DATE/AGE) =====
   const answers = [];
-
-  if (lower.includes("กี่โมง") || lower.includes("เวลา"))
-    answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น.`);
-
-  if (lower.includes("วันที่") || lower.includes("วันอะไร"))
-    answers.push(`📅 วันนี้วันที่ ${now.format("D MMMM YYYY")}`);
-
-  if (lower.includes("ปีอะไร"))
-    answers.push(`🗓 ปี พ.ศ. ${now.year() + 543}`);
-
-  if (lower.includes("อายุ"))
-    answers.push(
-      user.age ? `🎂 คุณอายุ ${user.age} ปีครับ` : "❗ ยังไม่ได้บันทึกอายุ"
-    );
-
+  if (lower.includes("กี่โมง") || lower.includes("เวลา")) answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น.`);
+  if (lower.includes("วันที่") || lower.includes("วันอะไร")) answers.push(`📅 วันนี้วันที่ ${now.format("D MMMM YYYY")}`);
+  if (lower.includes("ปีอะไร")) answers.push(`🗓 ปี พ.ศ. ${now.year() + 543}`);
+  if (lower.includes("อายุ")) answers.push(user.age ? `🎂 คุณอายุ ${user.age} ปีครับ` : "❗ ยังไม่ได้บันทึกอายุ");
+  
   if (lower.includes("วันเกิด")) {
     if (!user.birthday) {
       answers.push("❗ ยังไม่ได้บันทึกวันเกิด");
@@ -453,54 +366,24 @@ if (looksSwapped(realName, nickName)) {
       const [d, m] = user.birthday.split("/");
       let next = moment.tz(`${now.year()}-${m}-${d}`, "Asia/Bangkok");
       if (next.isBefore(now, "day")) next.add(1, "year");
-      answers.push(`🎂 เหลืออีก ${next.diff(now, "days")} วัน`);
+      answers.push(`🎂 เหลืออีก ${next.diff(now, "days")} วันจะถึงวันเกิด`);
     }
   }
 
-  if (lower.includes("ปีใหม่")) {
-    const ny = moment.tz(`${now.year() + 1}-01-01`, "Asia/Bangkok");
-    answers.push(`🎉 เหลืออีก ${ny.diff(now, "days")} วัน จะถึงวันปีใหม่`);
-  }
+  if (answers.length > 0) return reply(event, answers.join("\n"));
 
-  if (answers.length > 0)
-    return reply(event, answers.join("\n"));
-
-  // ====================================
-  // TOP NAME
-  // ====================================
+  // ===== 8. TOP NAME COMMAND =====
   if (lower === "/topname") {
-    const top = (obj) =>
-      Object.entries(obj)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([n, c]) => `${n} (${c})`)
-        .join("\n") || "-";
-
-    return reply(
-      event,
-      `📊 ชื่อยอดนิยม\n\n🪪 ชื่อจริง:\n${top(
-        nameStats.real
-      )}\n\n🎭 ชื่อเล่น:\n${top(nameStats.nick)}`
-    );
+    const top = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n} (${c})`).join("\n") || "-";
+    return reply(event, `📊 ชื่อยอดนิยม\n\n🪪 ชื่อจริง:\n${top(nameStats.real)}\n\n🎭 ชื่อเล่น:\n${top(nameStats.nick)}`);
   }
 
-  // ====================================
-  // OFFICIAL FACT
-  // ====================================
-  if (lower.includes("นายก"))
-    return reply(
-      event,
-      `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`
-    );
+  // ===== 9. OFFICIAL FACT & FINAL FILTERS =====
+  if (lower.includes("นายก")) return reply(event, `นายกรัฐมนตรีของประเทศไทยคือ ${officialFacts.primeMinister} ครับ`);
+  if (detectMessageType(text) === "badword") return reply(event, "ผมไม่สามารถตอบคำถามที่ไม่สุภาพได้");
 
-  if (detectMessageType(text) === "badword") {
-  return reply(event, "ผมไม่สามารถตอบคำถามที่ไม่สุภาพได้");
-}
-
-  // ====================================
-  // AI FALLBACK (ปลอดภัย)
-  // ====================================
-   try {
+  // ===== 10. AI FALLBACK =====
+  try {
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -516,15 +399,15 @@ if (looksSwapped(realName, nickName)) {
 }
 
 // ========================================
-// HELPER
+// HELPER FUNCTIONS (ย้ายออกมาด้านนอกเพื่อความถูกต้อง)
 // ========================================
 function reply(event, text) {
-  return client.replyMessage(event.replyToken, {
-    type: "text",
-    text,
-  });
+  return client.replyMessage(event.replyToken, { type: "text", text });
 }
 
-// ========================================
-app.get("/", (_, res) => res.send("ok"));
-app.listen(8080, () => console.log("🚀 Server running"));
+function increaseWarning(userId) {
+  console.log(`User ${userId} received a warning.`);
+}
+
+app.get("/", (_, res) => res.send("Bot is Online"));
+app.listen(8080, () => console.log("🚀 Server running on port 8080"));
