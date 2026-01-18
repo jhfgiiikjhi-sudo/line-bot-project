@@ -6,6 +6,7 @@ const express = require("express");
 const app = express();
 require("dotenv").config();
 
+const path = require("path");
 const fs = require("fs");
 const line = require("@line/bot-sdk");
 const OpenAI = require("openai");
@@ -236,15 +237,25 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 // MAIN LOGIC - รวมร่างสมบูรณ์ (Logic ครบทุกบรรทัด)
 // ========================================
 async function handleEvent(event) {
-  if (event.type !== "message" || event.message.type !== "text")
-    return reply(event, "ขออภัยครับ รองรับเฉพาะข้อความ 😊");
+  // 1. ปรับให้รับทั้งข้อความ (text) และรูปภาพ (image)
+  if (event.type !== "message" || !["text", "image"].includes(event.message.type)) {
+    return; // ถ้าส่งสติกเกอร์ หรืออย่างอื่นมา ให้บอทเงียบไว้
+  }
 
   const userId = event.source?.userId;
-  if (!userId) return reply(event, "ไม่สามารถระบุตัวตนผู้ใช้ได้ครับ");
+  if (!userId) return;
 
+  // 2. เพิ่ม Logic สำหรับเช็คว่าสิ่งที่ส่งมาคือ "รูปภาพ" หรือไม่
+  if (event.message.type === "image") {
+    return handleImageMessage(event, userId); // ถ้าเป็นรูป ให้กระโดดไปฟังก์ชันจัดการรูป
+  }
+
+  // 3. ถ้าไม่ใช่รูป (แปลว่าเป็นข้อความ) ก็ให้รัน Logic เดิมด้านล่าง
   const text = event.message.text.trim();
   const lower = text.toLowerCase();
   const now = moment().tz("Asia/Bangkok").locale("th");
+  
+  // ... โค้ดเดิมของคุณที่เหลือทั้งหมด ...
 
   // ===== 1. CREATE USER / INITIAL CHECK =====
   if (!users[userId]) {
@@ -502,5 +513,43 @@ function increaseWarning(userId) {
   }
 }
 
+async function handleImageMessage(event, userId) {
+  try {
+    const user = users[userId];
+    if (!user || user.step !== "done") {
+      return reply(event, "⚠️ กรุณาลงทะเบียนให้เสร็จก่อนส่งรูปภาพนะครับ");
+    }
+
+    // สร้างโฟลเดอร์ downloads ถ้ายังไม่มี
+    if (!fs.existsSync("./downloads")) {
+      fs.mkdirSync("./downloads");
+    }
+
+    // ดึงข้อมูลรูปภาพจาก LINE
+    const stream = await client.getMessageContent(event.message.id);
+    const fileName = `report_${userId}_${Date.now()}.jpg`;
+    const filePath = path.join(__dirname, "downloads", fileName);
+    
+    const writable = fs.createWriteStream(filePath);
+    stream.pipe(writable);
+
+    // เมื่อโหลดเสร็จ ให้ตอบกลับ
+    return new Promise((resolve, reject) => {
+      writable.on("finish", () => {
+        reply(event, `📸 ได้รับรูปภาพแล้วครับ!\nคุณ ${user.nickName} ต้องการแจ้งเรื่องอะไรครับ?\n\n1. แจ้งซ่อม (อุปกรณ์ชำรุด)\n2. แจ้งเรื่องร้องเรียน\n\n(พิมพ์หมายเลขหรือข้อความแจ้งรายละเอียดได้เลยครับ)`);
+        resolve();
+      });
+      writable.on("error", reject);
+    });
+
+  } catch (err) {
+    console.error("Image Error:", err);
+    reply(event, "❌ ขออภัยครับ ระบบไม่สามารถบันทึกรูปภาพได้ในขณะนี้");
+  }
+}
+
+// ========================================
+// START SERVER
+// ========================================
 app.get("/", (_, res) => res.send("Bot is Online"));
 app.listen(8080, () => console.log("🚀 Server running on port 8080"));
