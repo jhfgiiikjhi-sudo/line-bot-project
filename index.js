@@ -440,7 +440,7 @@ if (user.step === "ask_department") {
   saveUsers();
   saveStats();
   
-  return reply(event, `✅ ลงทะเบียนสำเร็จ!\n\n👤 ${user.realName}\n🎭 ${user.nickName}\n⚙️ แผนก${user.department}\n🎂 อายุ ${user.age} ปี`);
+  return reply(event, `✅ ลงทะเบียนสำเร็จ!\n\n👤 ${user.realName}\n🎭 ${user.nickName}\n⚙️ แผนก ${user.department}\n🎂 อายุ ${user.age} ปี`);
 }
 
   // ===== 7. MULTI INTENT (TIME/DATE/AGE) =====
@@ -520,30 +520,44 @@ async function handleImageMessage(event, userId) {
       return reply(event, "⚠️ กรุณาลงทะเบียนให้เสร็จก่อนส่งรูปภาพนะครับ");
     }
 
-    // สร้างโฟลเดอร์ downloads ถ้ายังไม่มี
-    if (!fs.existsSync("./downloads")) {
-      fs.mkdirSync("./downloads");
+    // 1. ตรวจสอบ Path โฟลเดอร์ให้เป็น Absolute Path เพื่อความแม่นยำ
+    const downloadPath = path.join(__dirname, "downloads");
+    if (!fs.existsSync(downloadPath)) {
+      fs.mkdirSync(downloadPath, { recursive: true }); // เพิ่ม recursive เพื่อความปลอดภัย
     }
 
-    // ดึงข้อมูลรูปภาพจาก LINE
+    // 2. ดึง Stream จาก LINE (ต้อง await ตรงนี้)
     const stream = await client.getMessageContent(event.message.id);
     const fileName = `report_${userId}_${Date.now()}.jpg`;
-    const filePath = path.join(__dirname, "downloads", fileName);
+    const filePath = path.join(downloadPath, fileName);
     
     const writable = fs.createWriteStream(filePath);
-    stream.pipe(writable);
 
-    // เมื่อโหลดเสร็จ ให้ตอบกลับ
-    return new Promise((resolve, reject) => {
+    // 3. ปรับ Logic การรอให้เขียนไฟล์เสร็จ (Promise)
+    await new Promise((resolve, reject) => {
+      stream.pipe(writable);
+      
       writable.on("finish", () => {
-        reply(event, `📸 ได้รับรูปภาพแล้วครับ!\nคุณ ${user.nickName} ต้องการแจ้งเรื่องอะไรครับ?\n\n1. แจ้งซ่อม (อุปกรณ์ชำรุด)\n2. แจ้งเรื่องร้องเรียน\n\n(พิมพ์หมายเลขหรือข้อความแจ้งรายละเอียดได้เลยครับ)`);
+        console.log(`✅ บันทึกรูปภาพสำเร็จ: ${filePath}`); // ดูใน Terminal ว่า Log นี้ขึ้นไหม
         resolve();
       });
-      writable.on("error", reject);
+
+      writable.on("error", (err) => {
+        console.error("❌ Writable Error:", err);
+        reject(err);
+      });
+      
+      stream.on("error", (err) => {
+        console.error("❌ Stream Error:", err);
+        reject(err);
+      });
     });
 
+    // 4. ส่งข้อความตอบกลับหลังจากที่ไฟล์เขียนเสร็จชัวร์ๆ แล้ว
+    return reply(event, `📸 ได้รับรูปภาพแล้วครับ!\nคุณ ${user.nickName} ต้องการแจ้งเรื่องอะไรครับ?\n\n1. แจ้งซ่อม (อุปกรณ์ชำรุด)\n2. แจ้งเรื่องร้องเรียน\n\n(พิมพ์หมายเลขหรือข้อความแจ้งรายละเอียดได้เลยครับ)`);
+
   } catch (err) {
-    console.error("Image Error:", err);
+    console.error("Image Processing Error:", err);
     reply(event, "❌ ขออภัยครับ ระบบไม่สามารถบันทึกรูปภาพได้ในขณะนี้");
   }
 }
