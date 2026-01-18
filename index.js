@@ -495,11 +495,10 @@ function reply(event, text) {
   return client.replyMessage(event.replyToken, { type: "text", text });
 }
 
+// แก้ตรงส่วนท้ายไฟล์
 function increaseWarning(userId) {
   if (users[userId]) {
-    users[userId].badCount = (users[userId].badCount || 0) + 1;
-    saveUsers(); // บันทึกลงไฟล์ทันที
-    console.log(`User ${userId} ถูกเตือนครั้งที่: ${users[userId].badCount}`);
+    console.log(`User ${userId} ถูกเตือน (แต้มปัจจุบันในระบบ: ${users[userId].badCount})`);
   }
 }
 
