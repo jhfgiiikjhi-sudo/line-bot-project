@@ -202,6 +202,90 @@ async function increaseWarning(user) {
 }
 
 // ========================================
+// NEWS SYNC (ระบบแจ้งข่าวสารวิทยาลัยอัตโนมัติ)
+// ========================================
+const cron = require("node-cron");
+const axios = require("axios");
+
+// เก็บ ID ข่าวล่าสุดที่ส่งไปแล้ว เพื่อไม่ให้ส่งซ้ำ
+let lastPostId = null;
+
+async function checkCollegeNews() {
+    try {
+        // ดึงข้อมูลโพสต์ล่าสุดจาก WordPress API ของวิทยาลัย
+        const response = await axios.get("https://www.sptc.ac.th/home/wp-json/wp/v2/posts?per_page=1&_embed");
+        const post = response.data[0];
+
+        if (!post) return;
+
+        // ถ้า ID ข่าวใหม่ไม่ตรงกับข่าวเดิมที่เคยส่ง
+        if (post.id !== lastPostId) {
+            lastPostId = post.id;
+            
+            const title = post.title.rendered;
+            const link = post.link;
+            // ดึงรูปภาพ Featured Image (ถ้ามี)
+            const imageUrl = post._embedded['wp:featuredmedia'] 
+                ? post._embedded['wp:featuredmedia'][0].source_url 
+                : "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png"; // รูปสำรองถ้าข่าวไม่มีรูป
+
+            // ดึงรายชื่อนักเรียนทั้งหมดจาก MongoDB
+            const users = await User.find({}, "userId");
+            const userIds = users.map(u => u.userId);
+
+            if (userIds.length > 0) {
+                // ส่งข่าวหาทุกคน (Broadcast)
+                // หมายเหตุ: การส่งแบบ multicast ส่งได้ทีละ 500 คน
+                await client.broadcast({
+                    type: "flex",
+                    altText: "📢 มีข่าวประกาศใหม่จากวิทยาลัย!",
+                    contents: {
+                      type: "bubble",
+                      hero: {
+                        type: "image",
+                        url: imageUrl,
+                        size: "full",
+                        aspectRatio: "20:13",
+                        aspectMode: "cover"
+                      },
+                      body: {
+                        type: "box",
+                        layout: "vertical",
+                        contents: [
+                          { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
+                          { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
+                        ]
+                      },
+                      footer: {
+                        type: "box",
+                        layout: "vertical",
+                        contents: [
+                          {
+                            type: "button",
+                            action: { type: "uri", label: "อ่านรายละเอียด", uri: link },
+                            style: "primary",
+                            color: "#2c3e50"
+                          }
+                        ]
+                      }
+                    }
+                });
+                console.log(`✅ Broadcasted news: ${title}`);
+            }
+        }
+    } catch (err) {
+        console.error("❌ News Sync Error:", err.message);
+    }
+}
+
+// ตั้งเวลาให้เช็คข่าวทุก 15 นาที (0, 15, 30, 45)
+cron.schedule("*/15 * * * *", () => {
+    console.log("🔍 Checking for new college updates...");
+    checkCollegeNews();
+});
+//=========================================
+
+// ========================================
 // WEBHOOK
 // ========================================
 app.post("/webhook", line.middleware(config), async (req, res) => {
