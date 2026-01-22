@@ -448,6 +448,15 @@ async function handleEvent(event) {
     }
     if (answers.length > 0) return reply(event, answers.join("\n"));
 
+    // ===== EXTRA: NAME INQUIRY =====
+        if (lower.includes("ผมชื่อเล่น") || lower.includes("ชื่อเล่นผม")) {
+        return reply(event, `🎭 คุณชื่อเล่นว่า **${user.nickName}** ครับ`);
+    }
+    if (lower.includes("ผมชื่ออะไร") || lower.includes("ชื่อจริงผม")) {
+        return reply(event, `👤 คุณชื่อจริงว่า **${user.realName}** ครับ`);
+    }
+    // ========================================
+
     // ===== 11. TOP NAME COMMAND =====
     if (lower === "/topname") {
         const top = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n} (${c})`).join("\n") || "-";
@@ -462,19 +471,30 @@ async function handleEvent(event) {
     }
 
     // ===== 13. AI FALLBACK (GPT-4o-mini) =====
-    try {
-        const res = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: `คุณคือผู้ช่วยอัจฉริยะของ ${collegeData.collegeName} ข้อมูลอ้างอิง: ${JSON.stringify(collegeData)} กฎ: 1.ใช้ข้อมูลอ้างอิงเป็นหลัก 2.สุภาพ 3.ไม่รู้ให้บอกติดต่อแผนกที่เกี่ยวข้อง` },
-                { role: "user", content: text },
-            ],
-            max_tokens: 400,
-        });
-        return reply(event, res.choices[0].message.content);
-    } catch (err) {
-        console.error("AI Error:", err);
-        return reply(event, "ขออภัยครับ ตอนนี้ระบบสมองกลขัดข้องชั่วคราว 🙏");
+try {
+    const res = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        // ตรวจสอบดูว่าในโค้ดของคุณเป็นแบบนี้ไหมนะครับ
+messages: [
+    { 
+      role: "system", 
+      content: `คุณคือผู้ช่วยอัจฉริยะของ ${collegeData.collegeName} ข้อมูลอ้างอิง: ${JSON.stringify(collegeData)} กฎ: 1.ใช้ข้อมูลอ้างอิงเป็นหลัก 2.สุภาพ 3.ไม่รู้ให้บอกติดต่อแผนกที่เกี่ยวข้อง` 
+    },
+    { 
+      role: "system", 
+      content: `ข้อมูลผู้ใช้ปัจจุบัน: ชื่อจริงคือ ${user.realName}, ชื่อเล่นคือ ${user.nickName}, อายุ ${user.age} ปี, แผนก ${user.department}` 
+    },
+    { 
+      role: "user", 
+      content: text 
+    },
+],
+        max_tokens: 400,
+    });
+    return reply(event, res.choices[0].message.content);
+} catch (err) {
+    console.error("AI Error:", err);
+    return reply(event, "ขออภัยครับ ตอนนี้ระบบสมองกลขัดข้องชั่วคราว 🙏");
     }
 }
 
