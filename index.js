@@ -2,6 +2,7 @@
 // STC Chatbot - index.js (ULTIMATE FINAL COMPLETE)
 // ========================================
 
+const cheerio = require("cheerio");
 const mongoose = require("mongoose");
 const express = require("express");
 const app = express();
@@ -212,53 +213,60 @@ let lastPostId = null;
 
 async function checkCollegeNews() {
     try {
-        console.log("📡 กำลังดึงข้อมูลจากเว็บ SPTC...");
-        const response = await axios.get("https://www.sptc.ac.th/home/wp-json/wp/v2/posts?per_page=1&_embed");
-        const post = response.data[0];
+        console.log("📡 กำลังกวาดข้อมูลข่าวจากหน้าเว็บ SPTC...");
+        
+        // 1. ดึงหน้าเว็บหลักของวิทยาลัย
+        const response = await axios.get("https://www.sptc.ac.th/home/", {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
 
-        if (!post) {
-            console.log("❌ ไม่พบโพสต์ใดๆ");
+        const $ = cheerio.load(response.data);
+        
+        // 2. หาโพสต์แรกในหน้าเว็บ (วิเคราะห์จากโครงสร้างเว็บ SPTC)
+        // โดยปกติข่าวล่าสุดจะอยู่ใน Tag <article> หรือ Class ที่เกี่ยวกับ post
+        const firstPost = $('article').first(); 
+        
+        const title = firstPost.find('h2').text().trim() || "ข่าวประชาสัมพันธ์ใหม่";
+        const link = firstPost.find('a').attr('href');
+        const imageUrl = firstPost.find('img').attr('src') || "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
+
+        if (!link) {
+            console.log("❌ ไม่พบลิงก์ข่าว");
             return;
         }
 
-        // --- ลองเอาเงื่อนไข IF ออกเพื่อบังคับส่ง ---
-        const title = post.title.rendered;
-        const link = post.link;
-        
-        // เช็คที่อยู่รูปภาพ
-        let imageUrl = "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
-        if (post._embedded && post._embedded['wp:featuredmedia']) {
-            imageUrl = post._embedded['wp:featuredmedia'][0].source_url;
-        }
+        // ใช้ Link ของข่าวเป็น ID เพื่อเช็คว่าซ้ำไหม
+        if (link !== lastPostId) {
+            lastPostId = link;
+            console.log("📢 เจอข่าวใหม่:", title);
 
-        console.log("📢 กำลังส่งข่าว:", title);
-
-        const users = await User.find({});
-        for (const user of users) {
-            await client.pushMessage(user.userId, {
-                type: "flex",
-                altText: "📢 ข่าวใหม่จากวิทยาลัย!",
-                contents: {
-                    type: "bubble",
-                    hero: { type: "image", url: imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
-                    body: {
-                        type: "box", layout: "vertical",
-                        contents: [
-                            { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
-                            { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
-                        ]
-                    },
-                    footer: {
-                        type: "box", layout: "vertical",
-                        contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+            const users = await User.find({});
+            for (const user of users) {
+                await client.pushMessage(user.userId, {
+                    type: "flex",
+                    altText: "📢 ข่าวใหม่จากวิทยาลัย!",
+                    contents: {
+                        type: "bubble",
+                        hero: { type: "image", url: imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
+                        body: {
+                            type: "box", layout: "vertical",
+                            contents: [
+                                { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
+                                { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
+                            ]
+                        },
+                        footer: {
+                            type: "box", layout: "vertical",
+                            contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+                        }
                     }
-                }
-            });
+                });
+            }
+        } else {
+            console.log("✅ ข่าวล่าสุดยังคงเดิม");
         }
-        // ---------------------------------------
-
     } catch (err) {
-        console.error("❌ News Sync Error:", err.message);
+        console.error("❌ Scraping Error:", err.message);
     }
 }
 
