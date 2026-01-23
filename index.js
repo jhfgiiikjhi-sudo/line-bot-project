@@ -401,10 +401,10 @@ async function handleEvent(event) {
     if (msgType === "badword") {
         user.badCount = (user.badCount || 0) + 1;
         
-        // เมื่อเตือนครบ 3 ครั้ง
+        // ถ้าครบ 3 ครั้ง บล็อกทันทีแล้วหยุดทำงาน (return)
         if (user.badCount >= 3) {
-            user.blockedUntil = moment().add(3, "minutes"); // ปรับเป็น 3 นาทีตามที่ต้องการ
-            user.badCount = 0; // รีเซ็ตแต้มสะสมเพื่อให้เริ่มนับใหม่หลังพ้นโทษ
+            user.blockedUntil = moment().add(3, "minutes");
+            user.badCount = 0; 
             await user.save();
             return reply(event, "⛔ ระบบระงับการใช้งาน 3 นาที\nเนื่องจากคุณใช้คำไม่สุภาพซ้ำหลายครั้ง กรุณาสื่อสารอย่างสร้างสรรค์ครับ");
         }
