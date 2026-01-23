@@ -100,95 +100,151 @@ const openai = new OpenAI({
 });
 
 // ========================================
-// UTIL (VALIDATION ฟังก์ชันตรวจสอบทั้งหมด)
+// UTIL (VALIDATION - EXTREME HARDENED VERSION)
 // ========================================
+
+// --- 1. CONSTANTS (รวมศูนย์ตัวแปรทั้งหมดไว้ที่นี่) ---
+
 const FORBIDDEN_NAMES = [
-  "สวัสดี","หวัดดี","ขอบคุณ","ครับ","ค่ะ","ดีครับ","ดีค่ะ",
-  "hello","hi","hey","ok","okay","test","ทดสอบ",
-  "admin","user","bot","system"
+    "สวัสดี","หวัดดี","ขอบคุณ","ครับ","ค่ะ","ดีครับ","ดีค่ะ",
+    "hello","hi","hey","ok","okay","test","ทดสอบ",
+    "admin","user","bot","system"
 ];
 
-const isForbidden = (t) => FORBIDDEN_NAMES.includes(t.toLowerCase());
-const isRepeated = (t) => /^(.)(\1{2,})$/.test(t);
+const BLACKLIST_WORDS = [
+    "ควย", "เย็ด", "เหี้ย", "สัส", "หี", "แตด", "มึง", "กู", 
+    "ดอกทอง", "กะหรี่", "ระยำ", "ชิบหาย",
+    "fuck", "shit", "bitch", "pussy", "dick", "cunt", "kuy", "yed"
+];
 
-const validThaiEng = (t, min, max) =>
-  /^[ก-๙a-zA-Z]+$/.test(t) && t.length >= min && t.length <= max;
+const EXTREME_BAD_PATTERNS = [
+    // ดักภาษาไทย: ตรวจพยัญชนะหลัก + อะไรก็ได้ที่คั่นกลาง
+    /[คข].*[วภ].*[ยญ]/,        // ค*ว*ย
+    /[เหเ].*ี.*้.*ย/,           // เ*ี*้ย
+    /[สส].*ั.*[สส]/,           // ส*ั*ส
+    /ห.*ี/,                    // ห*ี
+    /[เยเ].*็.*ด/,             // เ*ย*็*ด
+    /ก.*ู.*ม.*ึ.*ง/,           // กรู มึง
+    /ด.*อ.*ก.*ท.*อ.*ง/,        // ดอกทอง
+    /ช.*ิ.*บ.*ห.*า.*ย/,        // ชิบหาย
+    /แ.*ต.*ด/,                 // แตด
+    /ระ.*ย.*ำ/,                // ระยำ
+
+    // ดักภาษาอังกฤษ: ดักการลากเสียงและสัญลักษณ์คั่น
+    /f.*u.*c.*k/i, 
+    /s.*h.*i.*t/i, 
+    /b.*i.*t.*c.*h/i, 
+    /a.*s.*s/i, 
+    /p.*u.*s.*s.*y/i,
+    /d.*i.*c.*k/i,
+    /c.*u.*m/i
+];
+
+// --- 2. CORE FUNCTIONS (ฟังก์ชันการทำงานหลัก) ---
+
+/**
+ * ล้างข้อมูลข้อความ (Normalization) 
+ * แปลงตัวเลขคล้ายตัวอักษร ลบช่องว่าง และอักขระพิเศษ
+ */
+function hardenText(text) {
+    if (!text) return "";
+    return text.toLowerCase()
+        .replace(/\s+/g, "") 
+        .replace(/[0๑]/g, "o").replace(/[1๑]/g, "i").replace(/[3๓]/g, "e")
+        .replace(/[4๔]/g, "a").replace(/[5๕]/g, "s").replace(/[7๗]/g, "t")
+        .replace(/[^ก-๙a-zA-Z0-9]/g, ""); 
+}
+
+/**
+ * ตรวจสอบคำหยาบขั้นรุนแรง (3 ชั้น)
+ */
+function isExtremelyBad(text) {
+    if (!text) return false;
+    const clean = hardenText(text);
+    
+    // ชั้นที่ 1: Check Blacklist
+    if (BLACKLIST_WORDS.some(word => clean.includes(word))) return true;
+
+    // ชั้นที่ 2: Check Regex Patterns (ดักคำลากเสียง/เติมจุด)
+    if (EXTREME_BAD_PATTERNS.some(pattern => pattern.test(clean))) return true;
+
+    // ชั้นที่ 3: ดักพยัญชนะด่าล้วนๆ (Keyboard Smash)
+    if (clean.length >= 2 && /^[ควยเหี้ยสัสกม]+$/.test(clean)) return true;
+
+    return false;
+}
+
+/**
+ * ตรวจสอบสแปมและการพิมพ์ซ้ำซ้อน
+ */
+function isSpam(text) {
+    if (!text) return false;
+    // ดักการพิมพ์สัญลักษณ์รัวๆ
+    if (/^[!?@#\$%\^&\*\(\)\+=\-_.]{3,}$/.test(text)) return true;
+    // ดักการพิมพ์ตัวอักษรซ้ำเกิน 4 ตัว
+    if (/(.)\1{4,}/.test(text)) return true;
+    return false;
+}
+
+/**
+ * ตรวจสอบประเภทข้อความเพื่อใช้ในระบบ Filter หลัก
+ */
+function detectMessageType(text) {
+    if (!text) return "normal";
+    // ยกเว้นตัวเลขล้วน (เช่น อายุ) หรือ รูปแบบวันที่
+    if (/^\d+$/.test(text)) return "normal"; 
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return "normal";
+    
+    if (isExtremelyBad(text)) return "badword";
+    if (!/[ก-๙a-z0-9]/i.test(text) || isSpam(text)) return "spam";
+    
+    return "normal";
+}
+
+// --- 3. REGISTRATION HELPERS (ฟังก์ชันช่วยตรวจสอบการลงทะเบียน) ---
+
+function containsBadWord(text) {
+    return isExtremelyBad(text);
+}
+
+function isForbidden(t) {
+    if (!t) return false;
+    return FORBIDDEN_NAMES.includes(t.toLowerCase());
+}
 
 function isStrictlyHumanName(text) {
-  if (/(.)\1{3,}/.test(text)) return false;
-  if (!/^[a-zA-Zก-๙\s]+$/.test(text)) return false;
-  const hasThaiVowel = /[ะาิีึืุูเแโใไำั]/.test(text);
-  const keyboardSmash = /[ก-ฮ]{4,}/g; 
-  if (keyboardSmash.test(text) && !text.includes("์") && !hasThaiVowel) return false; 
-  if (/^[ะาิีึืุูํั].*/.test(text)) return false; 
-  if (/.*[เแโใไ]$/.test(text)) return false; 
-  if (text.length < 3 || text.length > 30) return false;
-  return true;
+    if (!text || text.length < 3 || text.length > 30) return false;
+    if (isSpam(text) || containsBadWord(text)) return false;
+    if (!/^[a-zA-Zก-๙\s]+$/.test(text)) return false;
+
+    const hasThaiVowel = /[ะาิีึืุูเแโใไำั]/.test(text);
+    // ดักพยัญชนะล้วนที่ไม่มีสระ (ยกเว้นที่มีการันต์)
+    if (/[ก-ฮ]{4,}/g.test(text) && !text.includes("์") && !hasThaiVowel) return false;
+    
+    return true;
 }
 
 function isHumanName(text, min, max) {
-  if (!validThaiEng(text, min, max)) return false;
-  if (isForbidden(text) || isRepeated(text)) return false;
-  if (/^[ก-ฮ]+$/.test(text) && !/[ะาิีึืุูเแโใไำั็]/.test(text)) return false;
-  if (/^[a-zA-Z]+$/.test(text) && !/[aeiou]/i.test(text)) return false;
-  return true;
+    if (!text) return false;
+    const validThaiEng = /^[ก-๙a-zA-Z]+$/.test(text) && text.length >= min && text.length <= max;
+    if (!validThaiEng) return false;
+    if (isForbidden(text) || isSpam(text) || containsBadWord(text)) return false;
+    
+    // ต้องมีสระประกอบ
+    if (/^[ก-ฮ]+$/.test(text) && !/[ะาิีึืุูเแโใไำั็]/.test(text)) return false;
+    if (/^[a-zA-Z]+$/.test(text) && !/[aeiou]/i.test(text)) return false;
+    
+    return true;
 }
 
 function looksSwapped(real, nick) {
-  if (!real || !nick) return false;
-  if (nick.length >= real.length + 3) return true;
-  if (real.length <= 3 && nick.length >= 6) return true;
-  return false;
+    if (!real || !nick) return false;
+    return (nick.length >= real.length + 3) || (real.length <= 3 && nick.length >= 6);
 }
 
 function isLikelyNickname(text) {
-  if (text.length <= 4) return true;
-  if (text.length >= 8) return false;
-  return true;
-}
-
-const BAD_WORDS = [
-  "ควย","เหี้ย","สัส","ห่า","หี","ชิบหาย","ฉิบหาย", "เย็ด" ,"น่าหี" ,"ลูกกะหรี่",
-  "fuck","shit","bitch","asshole","motherfucker" ,"Hee","Fuckyou" ,"Kuy" ,"yed" 
-];
-
-function normalizeBadWord(text) {
-  return text.toLowerCase().replace(/\s+/g, "");
-}
-
-function hasBadWord(text) {
-  const clean = normalizeBadWord(text);
-  return BAD_WORDS.some(word => clean.includes(word));
-}
-
-function normalizeText(text) {
-  return text.toLowerCase().replace(/\s+/g, "").replace(/[_\-\.]/g, "");
-}
-
-const BAD_PATTERNS = [
-  /ค+ว+ย+/, /ค+_+ว+_+ย+/, /ค+\s*ว+\s*ย+/,
-  /เห+ี+้*ย+/, /ส+ั+ส+/, /ห+ี+/, /ช+ิ+บ+ห+า+ย+/, /เย+็+ด+/,
-  /f+u+c+k+/i, /s+h+i+t+/i, /b+i+t+c+h+/i, /a+s+s+h+o+l+e+/i, /h+e+e+/i, /k+u+y+/i, /y+e+d+/i
-];
-
-function containsBadWord(text) {
-  const clean = normalizeText(text);
-  return BAD_PATTERNS.some(pattern => pattern.test(clean));
-}
-
-function isSpam(text) {
-  if (/^[!?@#\$%\^&\*\(\)\+=\-_.]{3,}$/.test(text)) return true;
-  if (/^(.)\1{4,}$/.test(text)) return true;
-  return false;
-}
-
-function detectMessageType(text) {
-  const clean = normalizeText(text);
-  if (/^\d+$/.test(clean)) return "normal";
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)) return "normal";
-  if (containsBadWord(clean)) return "badword";
-  if (!/[ก-๙a-z]/i.test(text) || isSpam(text)) return "spam";
-  return "normal";
+    if (!text) return false;
+    return text.length <= 5; 
 }
 
 // ========================================
@@ -339,24 +395,28 @@ async function handleEvent(event) {
         return reply(event, `⛔ คุณถูกระงับการใช้งานชั่วคราว\nกรุณารออีก ${diff} วินาที`);
     }
 
-    // ===== 5. GLOBAL BAD WORD & SPAM FILTER =====
+    // ===== 5. GLOBAL BAD WORD & SPAM FILTER (ULTIMATE VERSION) =====
     const msgType = detectMessageType(text);
-    if (msgType !== "normal") {
+
+    if (msgType === "badword") {
+        user.badCount = (user.badCount || 0) + 1;
+        
+        // เมื่อเตือนครบ 3 ครั้ง
         if (user.badCount >= 3) {
-            user.blockedUntil = moment().add(1, "minute");
-            user.badCount = 0;
+            user.blockedUntil = moment().add(3, "minutes"); // ปรับเป็น 3 นาทีตามที่ต้องการ
+            user.badCount = 0; // รีเซ็ตแต้มสะสมเพื่อให้เริ่มนับใหม่หลังพ้นโทษ
             await user.save();
-            return reply(event, "⛔ ระบบตรวจพบข้อความไม่เหมาะสมซ้ำหลายครั้ง\nระงับการใช้งาน 1 นาที");
+            return reply(event, "⛔ ระบบระงับการใช้งาน 3 นาที\nเนื่องจากคุณใช้คำไม่สุภาพซ้ำหลายครั้ง กรุณาสื่อสารอย่างสร้างสรรค์ครับ");
         }
-        if (isSpam(text)) {
-            return reply(event, "⚠️ ข้อความลักษณะสแปมหรือไม่สื่อความหมาย กรุณาพิมพ์ให้ชัดเจนครับ");
-        }
-        if (hasBadWord(text)) {
-            user.badCount = (user.badCount || 0) + 1;
-            await user.save();
-            increaseWarning(user); 
-            return reply(event, `⚠️ ❌ ข้อความนี้มีถ้อยคำไม่เหมาะสม กรุณาใช้คำสุภาพครับ\n(เตือนครั้งที่ ${user.badCount}/3)`);
-        }
+
+        // กรณีที่ยังไม่ครบ 3 ครั้ง ให้บันทึกแต้มและส่งคำเตือน
+        await user.save();
+        await increaseWarning(user); 
+        return reply(event, `⚠️ [ระบบป้องกันคำหยาบ] พบข้อความไม่เหมาะสม\nกรุณาใช้ภาษาที่สุภาพในการสื่อสารครับ (เตือนครั้งที่ ${user.badCount}/3)`);
+    }
+
+    if (msgType === "spam") {
+        return reply(event, "⚠️ ข้อความลักษณะสแปมหรือไม่สื่อความหมาย กรุณาพิมพ์ให้ชัดเจนครับ");
     }
 
     // ===== 6. LENGTH & GARBAGE CHECK =====
@@ -575,7 +635,7 @@ try {
             },
             { 
                 role: "system", 
-                content: `ข้อมูลผู้ใช้ปัจจุบัน: ชื่อจริงคือ ${user.realName}, ชื่อเล่นคือ ${user.nickName}, อายุ ${user.age} ปี, แผนก ${user.department}` 
+                content: `ข้อมูลผู้ใช้ปัจจุบัน: ชื่อจริงคือ ${user.realName || "ยังไม่ระบุ"}, ชื่อเล่นคือ ${user.nickName}, อายุ ${user.age} ปี, แผนก ${user.department}` 
             },
             { 
                 role: "system", 
