@@ -210,74 +210,97 @@ const axios = require("axios");
 
 // เก็บ ID ข่าวล่าสุดที่ส่งไปแล้ว เพื่อไม่ให้ส่งซ้ำ
 let lastPostId = null;
-
 async function checkCollegeNews() {
     try {
         console.log("📡 กำลังกวาดข้อมูลข่าวจากหน้าเว็บ SPTC...");
         const response = await axios.get("https://www.sptc.ac.th/home/", {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html'
+            },
+            timeout: 10000 // ป้องกันบอทค้างถ้าเว็บโหลดช้า
         });
 
         const $ = cheerio.load(response.data);
         const firstPost = $('article').first(); 
         
-        const title = firstPost.find('h2').text().trim() || "ข่าวประชาสัมพันธ์ใหม่";
+        const title = firstPost.find('h2, h3').first().text().trim() || "ข่าวประชาสัมพันธ์ใหม่";
         const link = firstPost.find('a').attr('href');
         
-        // --- ส่วนที่ปรับปรุง: การดึงรูปภาพให้แม่นยำขึ้น ---
-        let imageUrl = firstPost.find('img').attr('src');
+        // --- ปรับปรุงการดึงรูปภาพให้เจาะจงมากขึ้น ---
+        let imageUrl = firstPost.find('img').attr('data-src') || firstPost.find('img').attr('src');
         
-        // ถ้าหาภาพไม่เจอ หรือภาพเป็นลิงก์สั้น ให้ใช้โลโก้วิทยาลัยแทน
-        if (!imageUrl || !imageUrl.startsWith('http')) {
+        // ตรวจสอบความถูกต้องของ URL รูปภาพ
+        if (!imageUrl || !imageUrl.startsWith('http') || imageUrl.includes('avatar')) {
             imageUrl = "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
         }
-        // -------------------------------------------
 
         if (!link) {
-            console.log("❌ ไม่พบลิงก์ข่าว");
+            console.log("❌ ไม่พบลิงก์ข่าวในโพสต์แรก");
             return;
         }
 
+        // --- ระบบป้องกันการส่งซ้ำ ---
         if (link !== lastPostId) {
-            lastPostId = link;
             console.log("📢 เจอข่าวใหม่:", title);
-            console.log("📸 URL รูปภาพ:", imageUrl); // เพิ่ม Log ดูว่ารูปคืออะไร
+            console.log("🔗 ลิงก์:", link);
+            console.log("📸 รูปภาพ:", imageUrl);
+
+            // บันทึก ID ล่าสุดทันทีเพื่อป้องกันการส่งซ้อนถ้าฟังก์ชันทำงานซ้ำ
+            lastPostId = link; 
 
             const users = await User.find({});
+            console.log(`👥 กำลังส่งหาผู้ใช้ทั้งหมด ${users.length} คน...`);
+
             for (const user of users) {
                 try {
                     await client.pushMessage(user.userId, {
                         type: "flex",
-                        altText: "📢 ข่าวใหม่จากวิทยาลัย!",
+                        altText: `📢 ข่าวใหม่: ${title}`,
                         contents: {
                             type: "bubble",
-                            hero: { type: "image", url: imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
+                            hero: { 
+                                type: "image", 
+                                url: imageUrl, 
+                                size: "full", 
+                                aspectRatio: "20:13", 
+                                aspectMode: "cover",
+                                action: { type: "uri", uri: link }
+                            },
                             body: {
                                 type: "box", layout: "vertical",
                                 contents: [
                                     { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
-                                    { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
+                                    { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md", maxLines: 2 }
                                 ]
                             },
                             footer: {
                                 type: "box", layout: "vertical",
-                                contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+                                contents: [
+                                    { type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }
+                                ]
                             }
                         }
                     });
                 } catch (pushErr) {
-                    console.error(`❌ Push Error for user ${user.userId}:`, pushErr.message);
+                    // ถ้าผู้ใช้บล็อกบอท ให้ข้ามไป
+                    console.error(`❌ ไม่สามารถส่งหา ${user.userId} ได้:`, pushErr.message);
                 }
             }
         } else {
-            console.log("✅ ข่าวล่าสุดยังคงเดิม");
+            console.log("✅ ข่าวล่าสุดยังคงเดิม (ID ตรงกับที่เคยส่งแล้ว)");
         }
     } catch (err) {
         console.error("❌ Scraping Error:", err.message);
     }
 }
 
-// เพิ่มบรรทัดนี้ไว้ "นอก" ฟังก์ชัน เพื่อให้มันรันทันทีที่เปิดเครื่อง 1 ครั้ง
+// ตั้งเวลาให้ทำงานทุก 30 นาที (เพื่อความเสถียร)
+cron.schedule("*/30 * * * *", () => {
+    checkCollegeNews();
+});
+
+// รันทันที 1 ครั้งเมื่อ Start Server
 checkCollegeNews();
 
 // ตั้งเวลาให้เช็คข่าวทุก 15 นาที (0, 15, 30, 45)
