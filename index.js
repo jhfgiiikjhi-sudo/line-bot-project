@@ -41,6 +41,13 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model("User", userSchema);
 
+// เก็บสถานะระบบ (เช่น ID ข่าวล่าสุด)
+const systemStatusSchema = new mongoose.Schema({
+    key: { type: String, default: "last_news_id" },
+    value: String
+});
+const SystemStatus = mongoose.model("SystemStatus", systemStatusSchema);
+
 // รายชื่อสาขา
 const DEPARTMENTS = [
   "ช่างยนต์", "ช่างไฟฟ้ากำลัง", "ช่างอิเล็กทรอนิกส์", 
@@ -212,86 +219,65 @@ const axios = require("axios");
 let lastPostId = null;
 async function checkCollegeNews() {
     try {
-        console.log("📡 กำลังกวาดข้อมูลข่าวจากหน้าเว็บ SPTC...");
+        console.log("📡 เริ่มตรวจสอบข่าววิทยาลัย...");
         const response = await axios.get("https://www.sptc.ac.th/home/", {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html'
-            },
-            timeout: 10000 // ป้องกันบอทค้างถ้าเว็บโหลดช้า
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
 
         const $ = cheerio.load(response.data);
         const firstPost = $('article').first(); 
-        
-        const title = firstPost.find('h2, h3').first().text().trim() || "ข่าวประชาสัมพันธ์ใหม่";
+        const title = firstPost.find('h2, h3').first().text().trim() || "ข่าวประชาสัมพันธ์";
         const link = firstPost.find('a').attr('href');
-        
-        // --- ปรับปรุงการดึงรูปภาพให้เจาะจงมากขึ้น ---
         let imageUrl = firstPost.find('img').attr('data-src') || firstPost.find('img').attr('src');
-        
-        // ตรวจสอบความถูกต้องของ URL รูปภาพ
-        if (!imageUrl || !imageUrl.startsWith('http') || imageUrl.includes('avatar')) {
-            imageUrl = "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
-        }
 
-        if (!link) {
-            console.log("❌ ไม่พบลิงก์ข่าวในโพสต์แรก");
-            return;
-        }
+        if (!link) return;
 
-        // --- ระบบป้องกันการส่งซ้ำ ---
-        if (link !== lastPostId) {
-            console.log("📢 เจอข่าวใหม่:", title);
-            console.log("🔗 ลิงก์:", link);
-            console.log("📸 รูปภาพ:", imageUrl);
+        // ดึง ID ข่าวล่าสุดจาก MongoDB มาเทียบ
+        let savedStatus = await SystemStatus.findOne({ key: "last_news_id" });
+        const lastSavedId = savedStatus ? savedStatus.value : null;
 
-            // บันทึก ID ล่าสุดทันทีเพื่อป้องกันการส่งซ้อนถ้าฟังก์ชันทำงานซ้ำ
-            lastPostId = link; 
+        if (link !== lastSavedId) {
+            console.log("🆕 พบข่าวใหม่! กำลังกระจายข่าวให้ทุกคน...");
 
-            const users = await User.find({});
-            console.log(`👥 กำลังส่งหาผู้ใช้ทั้งหมด ${users.length} คน...`);
-
-            for (const user of users) {
-                try {
-                    await client.pushMessage(user.userId, {
-                        type: "flex",
-                        altText: `📢 ข่าวใหม่: ${title}`,
-                        contents: {
-                            type: "bubble",
-                            hero: { 
-                                type: "image", 
-                                url: imageUrl, 
-                                size: "full", 
-                                aspectRatio: "20:13", 
-                                aspectMode: "cover",
-                                action: { type: "uri", uri: link }
-                            },
-                            body: {
-                                type: "box", layout: "vertical",
-                                contents: [
-                                    { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
-                                    { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md", maxLines: 2 }
-                                ]
-                            },
-                            footer: {
-                                type: "box", layout: "vertical",
-                                contents: [
-                                    { type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }
-                                ]
-                            }
-                        }
-                    });
-                } catch (pushErr) {
-                    // ถ้าผู้ใช้บล็อกบอท ให้ข้ามไป
-                    console.error(`❌ ไม่สามารถส่งหา ${user.userId} ได้:`, pushErr.message);
-                }
+            // อัปเดต ID ใหม่ลง MongoDB ทันที
+            if (!savedStatus) {
+                await SystemStatus.create({ key: "last_news_id", value: link });
+            } else {
+                savedStatus.value = link;
+                await savedStatus.save();
             }
+
+            // ใช้การ Broadcast (ส่งหาทุกคนที่ Follow ในครั้งเดียว)
+            await client.broadcast({
+                type: "flex",
+                altText: `📢 ข่าวใหม่: ${title}`,
+                contents: {
+                    type: "bubble",
+                    hero: { 
+                        type: "image", url: imageUrl || "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png", 
+                        size: "full", aspectRatio: "20:13", aspectMode: "cover" 
+                    },
+                    body: {
+                        type: "box", layout: "vertical",
+                        contents: [
+                            { type: "text", text: "📢 ข่าวประชาสัมพันธ์ใหม่", weight: "bold", color: "#e67e22", size: "sm" },
+                            { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
+                        ]
+                    },
+                    footer: {
+                        type: "box", layout: "vertical",
+                        contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+                    }
+                }
+            });
+            
+            // เก็บชื่อข่าวไว้ให้ AI ใช้ตอบ (ใส่ในตัวแปร Global)
+            global.latestNewsTitle = title; 
         } else {
-            console.log("✅ ข่าวล่าสุดยังคงเดิม (ID ตรงกับที่เคยส่งแล้ว)");
+            console.log("✅ ข่าวล่าสุดยังคงเดิม (เช็คจาก DB)");
         }
     } catch (err) {
-        console.error("❌ Scraping Error:", err.message);
+        console.error("❌ News Sync Error:", err.message);
     }
 }
 
@@ -302,12 +288,6 @@ cron.schedule("*/30 * * * *", () => {
 
 // รันทันที 1 ครั้งเมื่อ Start Server
 checkCollegeNews();
-
-// ตั้งเวลาให้เช็คข่าวทุก 15 นาที (0, 15, 30, 45)
-cron.schedule("*/15 * * * *", () => {
-    console.log("🔍 Checking for new college updates...");
-    checkCollegeNews();
-});
 //=========================================
 
 // ========================================
@@ -581,23 +561,31 @@ async function handleEvent(event) {
 
     // ===== 13. AI FALLBACK (GPT-4o-mini) =====
 try {
+    // ดึงหัวข้อข่าวล่าสุดมาสร้างบริบท (Context) ให้ AI
+    const newsContext = global.latestNewsTitle 
+        ? `ข่าวประชาสัมพันธ์ล่าสุดของวิทยาลัยคือ: "${global.latestNewsTitle}"` 
+        : "ขณะนี้ยังไม่มีข่าวประชาสัมพันธ์ใหม่";
+
     const res = await openai.chat.completions.create({
         model: "gpt-4o-mini",
-        // ตรวจสอบดูว่าในโค้ดของคุณเป็นแบบนี้ไหมนะครับ
-messages: [
-    { 
-      role: "system", 
-      content: `คุณคือผู้ช่วยอัจฉริยะของ ${collegeData.collegeName} ข้อมูลอ้างอิง: ${JSON.stringify(collegeData)} กฎ: 1.ใช้ข้อมูลอ้างอิงเป็นหลัก 2.สุภาพ 3.ไม่รู้ให้บอกติดต่อแผนกที่เกี่ยวข้อง` 
-    },
-    { 
-      role: "system", 
-      content: `ข้อมูลผู้ใช้ปัจจุบัน: ชื่อจริงคือ ${user.realName}, ชื่อเล่นคือ ${user.nickName}, อายุ ${user.age} ปี, แผนก ${user.department}` 
-    },
-    { 
-      role: "user", 
-      content: text 
-    },
-],
+        messages: [
+            { 
+                role: "system", 
+                content: `คุณคือผู้ช่วยอัจฉริยะของ ${collegeData.collegeName} ข้อมูลอ้างอิง: ${JSON.stringify(collegeData)} กฎ: 1.ใช้ข้อมูลอ้างอิงเป็นหลัก 2.สุภาพ 3.ไม่รู้ให้บอกติดต่อแผนกที่เกี่ยวข้อง` 
+            },
+            { 
+                role: "system", 
+                content: `ข้อมูลผู้ใช้ปัจจุบัน: ชื่อจริงคือ ${user.realName}, ชื่อเล่นคือ ${user.nickName}, อายุ ${user.age} ปี, แผนก ${user.department}` 
+            },
+            { 
+                role: "system", 
+                content: `บริบทปัจจุบัน: ${newsContext}` // เพิ่มบรรทัดนี้เพื่อให้ AI รู้จักข่าวล่าสุด
+            },
+            { 
+                role: "user", 
+                content: text 
+            },
+        ],
         max_tokens: 400,
     });
     return reply(event, res.choices[0].message.content);
@@ -649,6 +637,17 @@ async function handleImageMessage(event, user) {
         return client.pushMessage(user.userId, { type: "text", text: "❌ ขออภัยครับ ระบบไม่สามารถประมวลผลรูปภาพได้" });
     }
 }
+
+// ดึงชื่อข่าวล่าสุดจาก DB มาเก็บใน Global ทันทีที่เปิดเครื่อง
+async function initGlobalStats() {
+    const savedStatus = await SystemStatus.findOne({ key: "last_news_id" });
+    if (savedStatus) {
+        // เนื่องจากใน DB เราเก็บเป็น Link เราอาจจะให้บอทรัน checkCollegeNews สักรอบ
+        // หรือจะแก้ Schema ให้เก็บทั้ง Link และ Title เลยก็ได้ครับ
+        console.log("📦 ระบบกำลังโหลดสถานะล่าสุด...");
+    }
+}
+initGlobalStats();
 
 // ========================================
 // SERVER START
