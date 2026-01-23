@@ -214,53 +214,60 @@ let lastPostId = null;
 async function checkCollegeNews() {
     try {
         console.log("📡 กำลังกวาดข้อมูลข่าวจากหน้าเว็บ SPTC...");
-        
-        // 1. ดึงหน้าเว็บหลักของวิทยาลัย
         const response = await axios.get("https://www.sptc.ac.th/home/", {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
         });
 
         const $ = cheerio.load(response.data);
-        
-        // 2. หาโพสต์แรกในหน้าเว็บ (วิเคราะห์จากโครงสร้างเว็บ SPTC)
-        // โดยปกติข่าวล่าสุดจะอยู่ใน Tag <article> หรือ Class ที่เกี่ยวกับ post
         const firstPost = $('article').first(); 
         
         const title = firstPost.find('h2').text().trim() || "ข่าวประชาสัมพันธ์ใหม่";
         const link = firstPost.find('a').attr('href');
-        const imageUrl = firstPost.find('img').attr('src') || "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
+        
+        // --- ส่วนที่ปรับปรุง: การดึงรูปภาพให้แม่นยำขึ้น ---
+        let imageUrl = firstPost.find('img').attr('src');
+        
+        // ถ้าหาภาพไม่เจอ หรือภาพเป็นลิงก์สั้น ให้ใช้โลโก้วิทยาลัยแทน
+        if (!imageUrl || !imageUrl.startsWith('http')) {
+            imageUrl = "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
+        }
+        // -------------------------------------------
 
         if (!link) {
             console.log("❌ ไม่พบลิงก์ข่าว");
             return;
         }
 
-        // ใช้ Link ของข่าวเป็น ID เพื่อเช็คว่าซ้ำไหม
         if (link !== lastPostId) {
             lastPostId = link;
             console.log("📢 เจอข่าวใหม่:", title);
+            console.log("📸 URL รูปภาพ:", imageUrl); // เพิ่ม Log ดูว่ารูปคืออะไร
 
             const users = await User.find({});
             for (const user of users) {
-                await client.pushMessage(user.userId, {
-                    type: "flex",
-                    altText: "📢 ข่าวใหม่จากวิทยาลัย!",
-                    contents: {
-                        type: "bubble",
-                        hero: { type: "image", url: imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
-                        body: {
-                            type: "box", layout: "vertical",
-                            contents: [
-                                { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
-                                { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
-                            ]
-                        },
-                        footer: {
-                            type: "box", layout: "vertical",
-                            contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+                try {
+                    await client.pushMessage(user.userId, {
+                        type: "flex",
+                        altText: "📢 ข่าวใหม่จากวิทยาลัย!",
+                        contents: {
+                            type: "bubble",
+                            hero: { type: "image", url: imageUrl, size: "full", aspectRatio: "20:13", aspectMode: "cover" },
+                            body: {
+                                type: "box", layout: "vertical",
+                                contents: [
+                                    { type: "text", text: "📢 ข่าวประชาสัมพันธ์", weight: "bold", color: "#e67e22", size: "sm" },
+                                    { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" }
+                                ]
+                            },
+                            footer: {
+                                type: "box", layout: "vertical",
+                                contents: [{ type: "button", action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, style: "primary", color: "#2c3e50" }]
+                            }
                         }
-                    }
-                });
+                    });
+                } catch (pushErr) {
+                    console.error(`❌ Push Error for user ${user.userId}:`, pushErr.message);
+                }
             }
         } else {
             console.log("✅ ข่าวล่าสุดยังคงเดิม");
