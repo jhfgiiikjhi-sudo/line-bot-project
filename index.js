@@ -690,21 +690,27 @@ if (user.realName && nameStats?.real?.[user.realName]) {
     if (lower.includes("วันที่") || lower.includes("วันอะไร")) answers.push(`📅 วันนี้วันที่ ${todayStr}`);
     if (lower.includes("ปีอะไร")) answers.push(`🗓 ปี พ.ศ. ${now.year() + 543}`);
 
-    // --- เช็คเรื่องข่าว (Fast Track) ---
+    // --- เช็คเรื่องข่าว (แยก ข่าวล่าสุด / ข่าวเมื่อวาน) ---
     if (lower.includes("ข่าว")) {
-        if (global.latestNewsTitle) {
-            let newsDateStatus = "";
-            if (global.latestNewsDate === todayStr) {
-                newsDateStatus = "(ข่าววันนี้ล่าสุด! 🔥)";
-            } else if (global.latestNewsDate === yesterdayStr) {
-                newsDateStatus = "(ข่าวเมื่อวานนี้)";
-            } else {
-                newsDateStatus = `(อัปเดตเมื่อ: ${global.latestNewsDate})`;
+        const newsList = await getLatestNews(2); // ดึงมา 2 ข่าวเพื่อเปรียบเทียบ
+        
+        if (newsList.length > 0) {
+            let selectedNews = newsList[0];
+            let statusText = "ล่าสุด! 🔥";
+
+            // ถ้าผู้ใช้ระบุว่า "เมื่อวาน" หรือ "ก่อนหน้า" ให้ดึงข่าวลำดับที่ 2
+            if (lower.includes("เมื่อวาน") || lower.includes("ก่อนหน้า") || lower.includes("ที่แล้ว")) {
+                if (newsList.length > 1) {
+                    selectedNews = newsList[1];
+                    statusText = "เมื่อวาน/ก่อนหน้านี้ 📰";
+                } else {
+                    return reply(event, "🤖 ตอนนี้พี่บอทมีข้อมูลแค่ข่าวล่าสุดเพียงอันเดียวครับ");
+                }
             }
 
-            answers.push(`📢 **ข่าวประชาสัมพันธ์** ${newsDateStatus}\nเรื่อง: ${global.latestNewsTitle}\n🔗 อ่านต่อ: ${global.latestNewsLink}`);
+            return reply(event, `📢 **ข่าวประชาสัมพันธ์** (${statusText})\nเรื่อง: ${selectedNews.title}\n🔗 อ่านต่อ: ${selectedNews.link}`);
         } else {
-            answers.push("📢 ขณะนี้ยังไม่มีข่าวประชาสัมพันธ์ใหม่จากวิทยาลัยครับ");
+            return reply(event, "📢 ขณะนี้ยังไม่มีข่าวประชาสัมพันธ์ใหม่จากวิทยาลัยครับ");
         }
     }
 
@@ -767,7 +773,19 @@ if (user.realName && nameStats?.real?.[user.realName]) {
         return reply(event, userInfo);
     }
 
-    // ===== 13. AI FALLBACK (GPT-4o-mini) =====
+    // ===== 13. NEW YEAR COUNTDOWN =====
+    if (lower.includes("ปีใหม่") && (lower.includes("อีกกี่วัน") || lower.includes("เหลืออีก"))) {
+        const now = moment().tz("Asia/Bangkok");
+        const nextYear = now.year() + 1;
+        const newYearDate = moment.tz(`${nextYear}-01-01 00:00:00`, "YYYY-MM-DD HH:mm:ss", "Asia/Bangkok");
+        
+        const daysLeft = newYearDate.diff(now, 'days');
+        const hoursLeft = newYearDate.diff(now, 'hours') % 24;
+
+        return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!\n\nเตรียมตัวฉลองกันหรือยังเอ่ย? ✨`);
+    }
+
+    // ===== 14. AI FALLBACK (GPT-4o-mini) =====
     try {
         // 1. เตรียม Context ของเวลาและข่าวสาร
         const todayStr = now.format("ddddที่ D MMMM YYYY");
@@ -861,7 +879,7 @@ async function handleImageMessage(event, user) {
                 messages: [{
                     role: "user",
                     content: [
-                        { type: "text", text: `วิเคราะห์รูปภาพนี้อย่างสุภาพในฐานะ 'พี่บอท' ผู้ช่วยวิทยาลัย SPTC ให้กับนักเรียนชื่อ ${user.realName} แผนก ${user.department}` },
+                        { type: "text", text: `วิเคราะห์รูปภาพนี้อย่างสุภาพในฐานะ 'พี่บอท' ผู้ช่วยวิทยาลัย SPTC ให้กับนักเรียนชื่อ ${user.nickName} แผนก ${user.department}` },
                         { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
                     ],
                 }],
@@ -909,6 +927,28 @@ initGlobalStats();
 cron.schedule("*/30 * * * *", () => {
     checkCollegeNews();
 });
+
+// ฟังก์ชันดึงข่าวจากหน้าเว็บ (ปรับปรุงให้ดึงได้หลายข่าว)
+async function getLatestNews(limit = 1) {
+    try {
+        const response = await axios.get("https://www.sptc.ac.th/home/");
+        const $ = cheerio.load(response.data);
+        const news = [];
+
+        $(".elementor-post__title a").each((i, el) => {
+            if (i < limit) {
+                news.push({
+                    title: $(el).text().trim(),
+                    link: $(el).attr("href")
+                });
+            }
+        });
+        return news;
+    } catch (err) {
+        console.error("❌ News Fetch Error:", err);
+        return [];
+    }
+}
 
 // ========================================
 // SERVER START
