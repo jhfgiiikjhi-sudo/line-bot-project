@@ -2,6 +2,7 @@
 // STC Chatbot - index.js (ULTIMATE FINAL COMPLETE)
 // ========================================
 
+const axios = require("axios"); 
 const cheerio = require("cheerio");
 const mongoose = require("mongoose");
 const express = require("express");
@@ -685,22 +686,24 @@ if (user.realName && nameStats?.real?.[user.realName]) {
 
     // --- ระบบเช็คข่าวสาร (Smart News) ---
     if (lower.includes("ข่าว")) {
-        const newsList = await getLatestNews(2);
-        if (newsList.length > 0) {
-            let selectedNews = newsList[0]; // ข่าวล่าสุด
+        const newsList = await getLatestNews(2); // มั่นใจว่าฟังก์ชันนี้ถูกประกาศไว้แล้ว
+        if (newsList && newsList.length > 0) {
+            let selectedNews = newsList[0];
             let typeText = "ล่าสุด! 🔥";
 
             if (lower.includes("เมื่อวาน") || lower.includes("ก่อนหน้า")) {
                 if (newsList.length > 1) {
                     selectedNews = newsList[1];
                     typeText = "เมื่อวาน/ก่อนหน้า 📰";
-                } else {
-                    return reply(event, "🤖 ตอนนี้พี่บอทพบข้อมูลข่าวเพียงอันเดียวครับ");
                 }
             }
             return reply(event, `📢 **ข่าวประชาสัมพันธ์** (${typeText})\nเรื่อง: ${selectedNews.title}\n🔗 อ่านต่อ: ${selectedNews.link}`);
         } else {
-            return reply(event, "📢 ขออภัยครับ ไม่สามารถดึงข่าวจากเว็บไซต์ได้ในขณะนี้");
+            // ลองเรียกจาก Global เผื่อ Scraper ทำงานผิดพลาด
+            if (global.latestNewsTitle) {
+                return reply(event, `📢 **ข่าวประชาสัมพันธ์** (ล่าสุด)\nเรื่อง: ${global.latestNewsTitle}\n🔗 อ่านต่อ: ${global.latestNewsLink}`);
+            }
+            return reply(event, "📢 ขออภัยครับ ไม่สามารถดึงข่าวได้ในขณะนี้");
         }
     }
 
