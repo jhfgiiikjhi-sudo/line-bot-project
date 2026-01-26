@@ -2,7 +2,6 @@
 // STC Chatbot - index.js (ULTIMATE FINAL COMPLETE)
 // ========================================
 
-const axios = require("axios"); 
 const cheerio = require("cheerio");
 const mongoose = require("mongoose");
 const express = require("express");
