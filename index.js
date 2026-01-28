@@ -160,16 +160,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
-// --- [ ส่วนที่เพิ่มเพื่อให้ระบบทำงานได้ครบตามกฎทอง ] ---
-
-// ฟังก์ชันช่วยส่งข้อความตอบกลับแบบสั้น (ลดความซ้ำซ้อนของโค้ด)
-const reply = (event, text) => {
-    return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: text
-    });
-};
-
 // ========================================
 // UTIL (VALIDATION - EXTREME HARDENED & RELAXED VERSION)
 // ========================================
@@ -824,4 +814,4 @@ cron.schedule("*/30 * * * *", () => {
     console.log("⏰ Cron: กำลังตรวจสอบข่าวใหม่จากวิทยาลัย...");
     checkCollegeNews();
 });
-
+// ========================================
