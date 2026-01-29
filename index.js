@@ -850,9 +850,7 @@ async function handleImageMessage(event, user) {
  */
 async function getLatestNews(limit = 2) {
     try {
-        // ดึงข่าวมาเผื่อไว้ 5 ข่าว เพื่อให้มั่นใจว่าจะมีข่าวที่ 2 (ข่าวเมื่อวาน) ให้ AI เลือกใช้
         const fetchLimit = limit < 5 ? 5 : limit; 
-        
         const response = await axios.get("https://www.sptc.ac.th/home/", {
             timeout: 10000,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -861,13 +859,13 @@ async function getLatestNews(limit = 2) {
         const $ = cheerio.load(response.data);
         const news = [];
         
-        // ปรับ Selector ให้ดึงจากคลาสหลักของ Elementor ที่ใช้ในหน้าเว็บ SPTC
-        $(".elementor-post__title a, .elementor-heading-title a").each((i, el) => {
+        // แก้ Selector: ใช้ Selector ที่กว้างขึ้นแต่ดักจับเฉพาะข่าวในส่วนเนื้อหา
+        $(".elementor-widget-container h2 a, .elementor-widget-container h3 a, .elementor-post__title a").each((i, el) => {
             const title = $(el).text().trim();
             const link = $(el).attr("href");
 
-            // ตรวจสอบว่ามีข้อมูลครบ และไม่เป็นลิงก์ซ้ำ (ป้องกันบางข่าวมีลิงก์ซ้ำในหน้าเดียว)
-            if (title && link && !news.some(n => n.link === link)) {
+            // กรอง: ต้องมีชื่อเรื่อง, มีลิงก์, ไม่ซ้ำ และ "ไม่ใช่เมนู"
+            if (title && link && title.length > 10 && !title.includes("Menu") && !news.some(n => n.link === link)) {
                 if (news.length < fetchLimit) {
                     news.push({ title, link });
                 }
@@ -875,6 +873,9 @@ async function getLatestNews(limit = 2) {
         });
 
         console.log(`✅ ดึงข่าวสำเร็จ: ${news.length} ข่าว`);
+        // Debug: พ่นชื่อข่าวที่ดึงได้ลง Console เพื่อเช็ค
+        if(news.length > 0) console.log(`📰 ข่าวแรกที่ดึงได้: ${news[0].title}`);
+        
         return news;
     } catch (err) {
         console.error("❌ News Fetch Error:", err.message);
