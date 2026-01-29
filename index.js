@@ -852,29 +852,50 @@ async function getLatestNews(limit = 2) {
     try {
         const fetchLimit = limit < 5 ? 5 : limit; 
         const response = await axios.get("https://www.sptc.ac.th/home/", {
-            timeout: 10000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            timeout: 15000, // เพิ่มเวลาให้เว็บที่โหลดช้า
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' 
+            }
         });
         
         const $ = cheerio.load(response.data);
         const news = [];
         
-        // แก้ Selector: ใช้ Selector ที่กว้างขึ้นแต่ดักจับเฉพาะข่าวในส่วนเนื้อหา
-        $(".elementor-widget-container h2 a, .elementor-widget-container h3 a, .elementor-post__title a").each((i, el) => {
+        // เจาะจงหาลิงก์ที่มี ?p= (ID ข่าว) ภายในส่วนที่เป็นเนื้อหา (elementor-widget-container)
+        $(".elementor-widget-container a[href*='?p=']").each((i, el) => {
             const title = $(el).text().trim();
             const link = $(el).attr("href");
 
-            // กรอง: ต้องมีชื่อเรื่อง, มีลิงก์, ไม่ซ้ำ และ "ไม่ใช่เมนู"
-            if (title && link && title.length > 10 && !title.includes("Menu") && !news.some(n => n.link === link)) {
+            // กรองเงื่อนไขที่เข้มงวดขึ้น:
+            // 1. ต้องมีชื่อเรื่องยาวกว่า 15 ตัวอักษร (กันพวกคำว่า 'อ่านต่อ' หรือ 'Menu')
+            // 2. ลิงก์ต้องเป็นลิงก์ถาวรของข่าว (?p=...)
+            // 3. ไม่ซ้ำกับข่าวที่เก็บไปแล้ว
+            if (title && link && title.length > 15 && !title.includes("Menu") && !news.some(n => n.link === link)) {
                 if (news.length < fetchLimit) {
                     news.push({ title, link });
                 }
             }
         });
 
+        // หาก Selector แรกไม่ได้ผล ให้ลองใช้ Selector สำรองที่กว้างขึ้น
+        if (news.length === 0) {
+            $("h2 a, h3 a, .elementor-post__title a").each((i, el) => {
+                const title = $(el).text().trim();
+                const link = $(el).attr("href");
+                if (title && link && title.length > 15 && !title.includes("Menu") && !news.some(n => n.link === link)) {
+                    if (news.length < fetchLimit) {
+                        news.push({ title, link });
+                    }
+                }
+            });
+        }
+
         console.log(`✅ ดึงข่าวสำเร็จ: ${news.length} ข่าว`);
-        // Debug: พ่นชื่อข่าวที่ดึงได้ลง Console เพื่อเช็ค
-        if(news.length > 0) console.log(`📰 ข่าวแรกที่ดึงได้: ${news[0].title}`);
+        if(news.length > 0) {
+            console.log(`📰 ตรวจสอบข่าวล่าสุด: ${news[0].title}`);
+        } else {
+            console.log("⚠️ คำแนะนำ: หากยังเป็น 0 ข่าว ให้ลองเช็คว่าหน้าเว็บ SPTC มีการเปลี่ยนรูปแบบการแสดงผลหรือไม่");
+        }
         
         return news;
     } catch (err) {
