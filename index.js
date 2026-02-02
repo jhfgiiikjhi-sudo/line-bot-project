@@ -755,21 +755,29 @@ if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- ระบบกรองข้อมูลบุคลากรแบบปรับปรุง (ค้นหาเจอแม่นยำขึ้น) ---
+        // --- ระบบกรองข้อมูลบุคลากรแบบปรับปรุง (ค้นหาได้แม่นยำขึ้นแม้สะกดไม่ครบ) ---
         let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase();
+        // ล้างคำค้นหาให้เหลือแต่ Keyword สำคัญเพื่อใช้เทียบ
+        const userInputClean = userInput.replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
         let matchCount = 0;
 
         for (const category in teacherData) {
             teacherData[category].forEach(t => {
-                // 1. ล้างชื่อเพื่อเปรียบเทียบ (ลบคำนำหน้าออก)
+                // 1. ล้างคำนำหน้าชื่อจริง
                 const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim();
                 
-                // 2. เช็คการจับคู่ (ชื่อครู | ตำแหน่ง | หรือชื่อหมวดหมู่ เช่น 'ผู้อำนวยการ')
+                // 2. เช็คชื่อครู
                 const nameMatch = userInput.includes(cleanName.toLowerCase());
-                const deptMatch = t.positions?.some(p => userInput.includes(p.toLowerCase().replace("แผนกวิชา", "").trim())) || 
-                                 (t.position && userInput.includes(t.position.toLowerCase().replace("แผนกวิชา", "").trim()));
-                const catMatch = userInput.includes(category.toLowerCase());
+
+                // 3. เช็คตำแหน่งหรือแผนก (เปรียบเทียบแบบยืดหยุ่นด้วย Keyword)
+                const deptMatch = t.positions?.some(p => {
+                    const cleanP = p.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
+                    return userInputClean.includes(cleanP) || cleanP.includes(userInputClean);
+                }) || (t.position && t.position.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").includes(userInputClean));
+
+                // 4. เช็คชื่อหมวดหมู่ (เช่น ผู้อำนวยการ)
+                const catMatch = userInput.includes(category.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim());
 
                 if (nameMatch || deptMatch || catMatch) {
                     if (matchCount === 0) relevantTeachers = "";
@@ -779,8 +787,8 @@ if (user.step === "done") {
             });
         }
         
-        // ถ้าเจอเยอะเกิน 12 คน ให้ AI บอกให้ระบุให้แคบลง
-        if (matchCount > 12) relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อครูหรือชื่อแผนกที่ต้องการทราบให้ชัดเจน เพื่อความรวดเร็วครับ";
+        // ถ้าเจอเยอะเกิน 12 คน ให้บอกให้นักเรียนระบุแผนกให้ชัดเจน
+        if (matchCount > 12) relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อครูหรือชื่อแผนกที่ต้องการทราบให้ชัดเจนเพื่อข้อมูลที่แม่นยำครับ";
         // ---------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
@@ -792,7 +800,7 @@ if (user.step === "done") {
                     [ข้อมูลผู้ใช้]
                     - ชื่อจริง: ${user.realName || "ไม่ระบุ"}
                     - ชื่อเล่น: ${user.nickName || "น้อง"}
-                    - แผนก: ${user.department || "ไม่ระบุ"}
+                    - แผนกที่เรียน: ${user.department || "ไม่ระบุ"}
 
                     [ข้อมูลอ้างอิงวิทยาลัย]
                     - พื้นที่วิทยาลัย: ${collegeData.physicalInfo?.area || "76 ไร่"}
@@ -812,10 +820,10 @@ if (user.step === "done") {
 
                     [แนวทางการตอบ]
                     1. แทนตัวเองว่า "พี่บอท" 
-                    2. หากถามถึงพื้นที่หรืออาคาร ให้ใช้ข้อมูลจาก [ข้อมูลอ้างอิงวิทยาลัย]
-                    3. หากถามถึงครู/อาจารย์ ให้ดึงข้อมูลจาก [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม] มาตอบ หากในนั้นบอกว่า "ไม่พบรายชื่อ" ให้แจ้งนักเรียนว่า "พี่บอทไม่พบรายชื่อครูหรือแผนกนี้ในระบบครับ ลองตรวจสอบชื่ออีกครั้งนะ"
-                    4. หากถามเรื่องเวลาเรียน ให้แจ้งช่วงเวลาให้ชัดเจนตามข้อมูลที่มี
-                    5. ตอบสุภาพ มีหางเสียง เป็นกันเองแต่ถูกต้องตามข้อมูลจริง` 
+                    2. หากถามถึงครู/อาจารย์ ให้ดึงข้อมูลจาก [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม] มาสรุปตอบเป็นข้อๆ
+                    3. หากข้อมูลบอกว่า "ไม่พบรายชื่อ" ให้ตอบว่าไม่พบในระบบและแนะนำให้ลองเช็คการสะกดชื่อ
+                    4. หากถามเรื่องเวลาเรียน ให้แจ้งตามข้อมูลใน [ข้อมูลอ้างอิงวิทยาลัย]
+                    5. ตอบสุภาพ มีหางเสียง เป็นกันเองแต่ต้องยึดข้อมูลจริงเป็นหลัก ห้ามแต่งชื่อครูขึ้นเอง` 
                 },
                 { role: "user", content: text }
             ],
