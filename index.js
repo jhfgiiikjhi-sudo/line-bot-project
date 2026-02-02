@@ -681,8 +681,13 @@ async function handleEvent(event) {
         return reply(event, answers.join("\n")); // เชื่อมคำตอบด้วยการขึ้นบรรทัดใหม่
     }
     if (lower === "/topname") {
-        const topReals = await NameStat.find({type:'real'}).sort({count:-1}).limit(3);
-        const resMsg = `📊 ชื่อยอดนิยมในระบบ:\n${topReals.map(n => `- ${n.name} (${n.count} คน)`).join('\n')}`;
+        const topNicks = await NameStat.find({ type: 'nick' }).sort({ count: -1 }).limit(3);
+        
+        if (topNicks.length === 0) {
+            return reply(event, "📊 ยังไม่มีข้อมูลชื่อเล่นในระบบครับ");
+        }
+
+        const resMsg = `📊 ชื่อเล่นยอดนิยมในระบบ:\n${topNicks.map((n, i) => `${i + 1}. ${n.name} (${n.count} คน)`).join('\n')}`;
         return reply(event, resMsg);
     }
 
