@@ -755,65 +755,76 @@ if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- 🚀 FINAL SEARCH LOGIC (เน้นหาเจอแน่นอน) ---
-        let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
-        let matchCount = 0;
+        // --- 🚀 ULTIMATE SEARCH ENGINE (ฉบับมืออาชีพ) ---
+        let matchedTeachers = [];
+        const rawInput = text.toLowerCase().trim();
         
-        // ปรับ Keyword ให้ค้นหาง่ายขึ้น
-        const searchKeyword = text.toLowerCase().replace(/\s+/g, '').trim();
+        // ฟังก์ชันล้างคำให้เหลือแต่แก่น (เช่น แผนกวิชาช่างยนต์ -> ยนต์)
+        const normalize = (str) => {
+            if (!str) return "";
+            return str.toLowerCase()
+                .replace(/\s+/g, '')
+                .replace(/(แผนกวิชา|แผนก|วิชา|ช่าง|การ|ครู|อาจารย์|หัวหน้า|คือใคร|หน่อย|ขอดู|รายชื่อ)/g, '')
+                .replace(/(กราฟฟิก|กราฟิค|graphic)/g, 'กราฟิก'); // ปรับมาตรฐานคำว่ากราฟิก
+        };
 
-        if (searchKeyword.length >= 2) { 
-            let matchedList = [];
+        const searchKeyword = normalize(rawInput);
 
+        // ค้นหาข้อมูลครู (เฉพาะเมื่อมี keyword 2 ตัวอักษรขึ้นไป)
+        if (searchKeyword.length >= 2) {
             for (const category in teacherData) {
                 teacherData[category].forEach(t => {
-                    // รวมข้อมูลทั้งหมดที่มีในตัวครูคนนี้มาเช็ค
-                    const teacherName = t.name.toLowerCase();
-                    const teacherPos = (t.positions ? t.positions.join(" ") : (t.position || "")).toLowerCase();
-                    const teacherCat = category.toLowerCase();
-                    
-                    // รวมร่างข้อมูลเข้าด้วยกันเพื่อให้ Keyword อะไรก็เจอ
-                    const combinedData = teacherName + teacherPos + teacherCat;
+                    const teacherName = normalize(t.name);
+                    const teacherPos = normalize(t.positions ? t.positions.join(" ") : (t.position || ""));
+                    const catName = normalize(category);
 
-                    // ค้นหาแบบยืดหยุ่น (Partial Match)
-                    // เช่น ถ้าถาม "ช่างยนต์" จะเจอใน "แผนกวิชาช่างยนต์"
-                    if (combinedData.includes(searchKeyword) || 
-                        searchKeyword.includes("ช่างยนต์") && combinedData.includes("ช่างยนต์") ||
-                        (searchKeyword.includes("กราฟิก") || searchKeyword.includes("กราฟฟิก")) && combinedData.includes("กราฟฟิก")) {
-                        
-                        matchedList.push(`- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`);
-                        matchCount++;
+                    // ถ้า Keyword ตรงกับชื่อ, ตำแหน่ง หรือแผนก
+                    if (teacherName.includes(searchKeyword) || teacherPos.includes(searchKeyword) || catName.includes(searchKeyword)) {
+                        matchedTeachers.push(`- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`);
                     }
                 });
             }
-            if (matchCount > 0) relevantTeachers = matchedList.join("\n");
         }
 
-        // ถ้าผลลัพธ์เยอะเกินไป
-        if (matchCount > 15) relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อแผนกให้ชัดเจน เช่น 'ช่างยนต์' หรือ 'ไอที' ครับ";
-        // -----------------------------------------------------------------------
+        // เตรียม Context สำหรับ AI
+        let teacherContext = matchedTeachers.length > 0 
+            ? matchedTeachers.join("\n") 
+            : "ไม่พบรายชื่อครูหรือแผนกนี้ในฐานข้อมูล (ให้แจ้งผู้ใช้ว่าไม่พบข้อมูลและตรวจสอบการสะกด)";
+
+        if (matchedTeachers.length > 15) {
+            teacherContext = "พบรายชื่อจำนวนมาก กรุณาระบุชื่อแผนกให้เจาะจง เช่น 'หัวหน้าแผนกช่างยนต์'";
+        }
+        // ----------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาจากวิทยาลัยเทคนิคสมุทรปราการ
-                    [ข้อมูลบุคลากรที่ค้นพบ]
-                    ${relevantTeachers}
+                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ
+                    [ข้อมูลผู้ใช้]
+                    - ชื่อจริง: ${user.realName || "ไม่ระบุ"} | ชื่อเล่น: ${user.nickName || "น้อง"}
+                    - แผนก: ${user.department || "ไม่ระบุ"}
                     
-                    [ข้อมูลกายภาพ] พื้นที่ 76 ไร่, อาคาร 26 หลัง, แฟลต 17 หลัง
-                    [ข้อมูลผู้ใช้] ชื่อ: ${user.nickName} | แผนก: ${user.department}
+                    [ข้อมูลอ้างอิงวิทยาลัย]
+                    - พื้นที่: 76 ไร่ | อาคารเรียน: 26 หลัง | บ้านพัก: 17 หลัง
+                    - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
+                    - ข้อมูลวิทยาลัยทั่วไป: ${JSON.stringify(collegeData)}
+                    - ข้อมูลอ้างอิงอื่นๆ: ${JSON.stringify(officialFacts)}
+
+                    [ข้อมูลบุคลากรที่ค้นพบตามคำถาม]
+                    ${teacherContext}
 
                     [แนวทางการตอบ]
-                    1. หากใน [ข้อมูลบุคลากรที่ค้นพบ] มีรายชื่อ ให้สรุปตอบให้ครบถ้วน ห้ามข้ามรายชื่อเด็ดขาด
-                    2. หากระบบแจ้งว่า "ไม่พบรายชื่อ" ให้ตอบว่าไม่พบในฐานข้อมูล และแนะนำให้ลองพิมพ์ชื่อแผนกเต็มๆ
-                    3. ตอบสุภาพ เป็นกันเอง และห้ามมโนชื่อครูขึ้นเอง` 
+                    1. แทนตัวเองว่า "พี่บอท" และลงท้ายด้วย "ครับ/ค่ะ"
+                    2. หากมีรายชื่อใน [ข้อมูลบุคลากรที่ค้นพบ] ให้สรุปออกมาเป็นข้อๆ ให้ครบถ้วน ห้ามข้ามเด็ดขาด
+                    3. หากไม่พบรายชื่อ ให้บอกอย่างสุภาพว่าไม่พบในระบบ และแนะนำให้ตรวจสอบการสะกดชื่อแผนก
+                    4. ห้ามแต่งชื่อครูขึ้นเองเด็ดขาด และยึดข้อมูลตามที่ให้ไว้เท่านั้น` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.3,
-            max_tokens: 600
+            temperature: 0.4,
+            max_tokens: 800
         });
 
         return reply(event, aiResponse.choices[0].message.content);
