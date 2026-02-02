@@ -754,27 +754,33 @@ async function handleEvent(event) {
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
-        // --- ระบบกรองข้อมูลบุคลากรแบบเจาะจง (ป้องกันข้อมูลเยอะเกินไป) ---
+        
+        // --- ระบบกรองข้อมูลบุคลากรแบบปรับปรุง (ค้นหาเจอแม่นยำขึ้น) ---
         let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase();
         let matchCount = 0;
 
         for (const category in teacherData) {
             teacherData[category].forEach(t => {
-                // ค้นหาทั้งชื่อครู และชื่อแผนก/ตำแหน่ง
-                const nameMatch = userInput.includes(t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.)/g, "").trim());
-                const deptMatch = t.positions?.some(p => userInput.includes(p.replace("แผนกวิชา", "").trim())) || 
-                                 (t.position && userInput.includes(t.position.replace("แผนกวิชา", "").trim()));
+                // 1. ล้างชื่อเพื่อเปรียบเทียบ (ลบคำนำหน้าออก)
+                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim();
+                
+                // 2. เช็คการจับคู่ (ชื่อครู | ตำแหน่ง | หรือชื่อหมวดหมู่ เช่น 'ผู้อำนวยการ')
+                const nameMatch = userInput.includes(cleanName.toLowerCase());
+                const deptMatch = t.positions?.some(p => userInput.includes(p.toLowerCase().replace("แผนกวิชา", "").trim())) || 
+                                 (t.position && userInput.includes(t.position.toLowerCase().replace("แผนกวิชา", "").trim()));
+                const catMatch = userInput.includes(category.toLowerCase());
 
-                if (nameMatch || deptMatch) {
+                if (nameMatch || deptMatch || catMatch) {
                     if (matchCount === 0) relevantTeachers = "";
                     relevantTeachers += `\n- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`;
                     matchCount++;
                 }
             });
         }
-        // ถ้าเจอเยอะเกิน 10 คน ให้บอก AI ว่าให้แจ้งให้นักเรียนระบุแผนกให้ชัดเจน
-        if (matchCount > 10) relevantTeachers = "พบรายชื่อจำนวนมาก กรุณาบอกชื่อแผนกหรือชื่อครูที่ต้องการทราบให้ชัดเจนเพื่อข้อมูลที่แม่นยำ";
+        
+        // ถ้าเจอเยอะเกิน 12 คน ให้ AI บอกให้ระบุให้แคบลง
+        if (matchCount > 12) relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อครูหรือชื่อแผนกที่ต้องการทราบให้ชัดเจน เพื่อความรวดเร็วครับ";
         // ---------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
@@ -786,9 +792,7 @@ if (user.step === "done") {
                     [ข้อมูลผู้ใช้]
                     - ชื่อจริง: ${user.realName || "ไม่ระบุ"}
                     - ชื่อเล่น: ${user.nickName || "น้อง"}
-                    - อายุ: ${user.age || "ไม่ระบุ"} ปี
                     - แผนก: ${user.department || "ไม่ระบุ"}
-                    - วันเกิด: ${user.birthday || "ไม่ได้ลงทะเบียนไว้"}
 
                     [ข้อมูลอ้างอิงวิทยาลัย]
                     - พื้นที่วิทยาลัย: ${collegeData.physicalInfo?.area || "76 ไร่"}
@@ -809,10 +813,9 @@ if (user.step === "done") {
                     [แนวทางการตอบ]
                     1. แทนตัวเองว่า "พี่บอท" 
                     2. หากถามถึงพื้นที่หรืออาคาร ให้ใช้ข้อมูลจาก [ข้อมูลอ้างอิงวิทยาลัย]
-                    3. หากนักเรียนถามถึงครู/อาจารย์ ให้ดึงข้อมูลจาก [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม] มาตอบเป็นข้อๆ ให้ดูง่าย
-                    4. หากไม่พบข้อมูลครูในส่วนที่เตรียมไว้ ให้แจ้งนักเรียนว่า "พี่บอทไม่พบรายชื่อครูหรือแผนกนี้ในระบบเบื้องต้นครับ ลองตรวจสอบชื่ออีกครั้งนะ"
-                    5. หากถามเรื่องเวลาเรียน ให้แจ้งช่วงเวลา เช้า/บ่าย/ค่ำ ให้ชัดเจน
-                    6. ตอบสุภาพ มีหางเสียง และห้ามดัดแปลงข้อมูลหรือคิดชื่อครูขึ้นเองเด็ดขาด` 
+                    3. หากถามถึงครู/อาจารย์ ให้ดึงข้อมูลจาก [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม] มาตอบ หากในนั้นบอกว่า "ไม่พบรายชื่อ" ให้แจ้งนักเรียนว่า "พี่บอทไม่พบรายชื่อครูหรือแผนกนี้ในระบบครับ ลองตรวจสอบชื่ออีกครั้งนะ"
+                    4. หากถามเรื่องเวลาเรียน ให้แจ้งช่วงเวลาให้ชัดเจนตามข้อมูลที่มี
+                    5. ตอบสุภาพ มีหางเสียง เป็นกันเองแต่ถูกต้องตามข้อมูลจริง` 
                 },
                 { role: "user", content: text }
             ],
@@ -825,7 +828,7 @@ if (user.step === "done") {
         return reply(event, `ขออภัยครับน้อง ${user.nickName} พี่บอทมึนหัวนิดหน่อย รบกวนถามใหม่อีกครั้งนะ 🤖`);
     }
 }
-} // ปิด handleEvent เรียบร้อย
+}
 
 // ========================================
 // IMAGE PROCESSING FUNCTION (AI VISION & REPORT)
