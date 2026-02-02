@@ -764,24 +764,33 @@ if (user.step === "done") {
 
         for (const category in teacherData) {
             teacherData[category].forEach(t => {
-                // 1. ล้างคำนำหน้าชื่อจริง
-                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim();
+                // 1. เตรียมข้อมูลสำหรับค้นหา (ล้างคำนำหน้าและทำให้เป็นตัวเล็ก)
+                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
+                const userInputLower = userInput.toLowerCase();
                 
-                // 2. เช็คชื่อครู
-                const nameMatch = userInput.includes(cleanName.toLowerCase());
+                // 2. ตรวจสอบชื่อ (ถ้าในคำถามมีชื่อครู)
+                const nameMatch = userInputLower.includes(cleanName);
 
-                // 3. เช็คตำแหน่งหรือแผนก (เปรียบเทียบแบบยืดหยุ่นด้วย Keyword)
-                const deptMatch = t.positions?.some(p => {
-                    const cleanP = p.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-                    return userInputClean.includes(cleanP) || cleanP.includes(userInputClean);
-                }) || (t.position && t.position.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").includes(userInputClean));
+                // 3. ตรวจสอบในตำแหน่ง (Positions) - เช็คทุกตัวอักษรใน Array
+                let deptMatch = false;
+                if (t.positions && Array.isArray(t.positions)) {
+                    deptMatch = t.positions.some(p => {
+                        const pLower = p.toLowerCase();
+                        // เช็คว่าคำที่เด็กพิมพ์ (เช่น "ช่างยนต์") มีอยู่ในชื่อตำแหน่งไหม
+                        return pLower.includes(userInputLower.replace("แผนก", "").trim());
+                    });
+                } else if (t.position) {
+                    deptMatch = t.position.toLowerCase().includes(userInputLower.replace("แผนก", "").trim());
+                }
 
-                // 4. เช็คชื่อหมวดหมู่ (เช่น ผู้อำนวยการ)
-                const catMatch = userInput.includes(category.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim());
+                // 4. ตรวจสอบจากชื่อหมวดหมู่ (เช่น "หัวหน้าแผนก")
+                const catMatch = userInputLower.includes(category.toLowerCase());
 
+                // ✨ ถ้าตรงเงื่อนไขอย่างใดอย่างหนึ่ง ให้เก็บข้อมูลไว้ส่งให้ AI
                 if (nameMatch || deptMatch || catMatch) {
                     if (matchCount === 0) relevantTeachers = "";
-                    relevantTeachers += `\n- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`;
+                    const posDisplay = t.positions ? t.positions.join(", ") : t.position;
+                    relevantTeachers += `\n- ${t.name} (ตำแหน่ง: ${posDisplay})`;
                     matchCount++;
                 }
             });
