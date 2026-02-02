@@ -20,6 +20,13 @@ moment.locale('th');
 
 const collegeData = require("./collegeData");
 const officialFacts = require("./officialFacts");
+let teacherData = {}; 
+try {
+    teacherData = require("./teacherData");
+    console.log("✅ Load teacherData.jsสำเร็จ");
+} catch (err) {
+    console.log("⚠️ ไม่พบไฟล์ teacherData.js ระบบจะทำงานโดยไม่มีข้อมูลครู");
+}
 const MONGO_URI = process.env.MONGO_URI;
 
 mongoose.connect(MONGO_URI)
@@ -743,8 +750,6 @@ async function handleEvent(event) {
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
-        const teacherData = require("./teacherData"); 
-
         // --- ระบบกรองข้อมูลบุคลากรแบบเจาะจง (ป้องกันข้อมูลเยอะเกินไป) ---
         let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase();
