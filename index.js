@@ -666,11 +666,15 @@ async function handleEvent(event) {
     }
 
     // 10. MULTI INTENT (ปรับปรุงให้ตอบได้หลายอย่างพร้อมกัน)
-    let answers = []; // สร้างตัวแปรเก็บคำตอบ
+    let answers = []; 
 
     // เช็คเรื่องเวลา
     if (lower.includes("กี่โมง") || lower.includes("เวลา")) {
-        answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับน้อง ${user.nickName}`);
+        // ✨ เพิ่มเงื่อนไข: ถ้าถามเรื่องเวลา แต่ไม่มีคำว่า "เรียน" หรือ "รอบ" (ที่เป็นเวลาเรียน) ถึงจะตอบเวลาปัจจุบัน
+        if (!lower.includes("เรียน") && !lower.includes("รอบ")) {
+            answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับน้อง ${user.nickName}`);
+        }
+        // ถ้ามีคำว่า "เรียน" ระบบจะข้ามเงื่อนไขนี้ไป และไปให้ AI ตอบในข้อ 11 แทน
     }
 
     // เช็คเรื่องวันที่
