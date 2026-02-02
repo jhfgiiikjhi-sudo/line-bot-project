@@ -755,32 +755,33 @@ if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- 🚀 EXPERT SEARCH LOGIC (แก้ปัญหา ช่างยนต์/กราฟิก ไม่เจอ) ---
+        // --- 🚀 FINAL SEARCH LOGIC (เน้นหาเจอแน่นอน) ---
         let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
         let matchCount = 0;
         
-        // ฟังก์ชันช่วยทำความสะอาดคำ (ลบช่องว่าง, ลบคำฟุ่มเฟือย, ปรับมาตรฐานคำ)
-        const clean = (str) => {
-            if (!str) return "";
-            return str.toLowerCase()
-                .replace(/\s+/g, '')
-                .replace(/(กราฟฟิก|กราฟิค|graphic)/g, 'กราฟิก') // มาตรฐานคำว่ากราฟิก
-                .replace(/(แผนกวิชา|แผนก|วิชา|ช่าง|การ|หัวหน้า|คือใคร|ครู|อาจารย์)/g, ''); // ลบคำฟุ่มเฟือย
-        };
-
-        const searchKeyword = clean(text);
+        // ปรับ Keyword ให้ค้นหาง่ายขึ้น
+        const searchKeyword = text.toLowerCase().replace(/\s+/g, '').trim();
 
         if (searchKeyword.length >= 2) { 
             let matchedList = [];
 
             for (const category in teacherData) {
                 teacherData[category].forEach(t => {
-                    // รวมข้อมูลทั้งหมดของครูคนนี้มาเช็ค (ชื่อ + ตำแหน่ง + หมวดหมู่)
-                    const fullData = clean(t.name + (t.positions ? t.positions.join('') : (t.position || '')) + category);
+                    // รวมข้อมูลทั้งหมดที่มีในตัวครูคนนี้มาเช็ค
+                    const teacherName = t.name.toLowerCase();
+                    const teacherPos = (t.positions ? t.positions.join(" ") : (t.position || "")).toLowerCase();
+                    const teacherCat = category.toLowerCase();
+                    
+                    // รวมร่างข้อมูลเข้าด้วยกันเพื่อให้ Keyword อะไรก็เจอ
+                    const combinedData = teacherName + teacherPos + teacherCat;
 
-                    // ตรวจสอบว่า Keyword ที่เด็กพิมพ์ (เช่น 'ยนต์') อยู่ในข้อมูลครูคนนี้ไหม
-                    if (fullData.includes(searchKeyword)) {
-                        matchedList.push(`- ${t.name} (ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position})`);
+                    // ค้นหาแบบยืดหยุ่น (Partial Match)
+                    // เช่น ถ้าถาม "ช่างยนต์" จะเจอใน "แผนกวิชาช่างยนต์"
+                    if (combinedData.includes(searchKeyword) || 
+                        searchKeyword.includes("ช่างยนต์") && combinedData.includes("ช่างยนต์") ||
+                        (searchKeyword.includes("กราฟิก") || searchKeyword.includes("กราฟฟิก")) && combinedData.includes("กราฟฟิก")) {
+                        
+                        matchedList.push(`- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`);
                         matchCount++;
                     }
                 });
@@ -788,10 +789,8 @@ if (user.step === "done") {
             if (matchCount > 0) relevantTeachers = matchedList.join("\n");
         }
 
-        // ป้องกันข้อมูลล้น
-        if (matchCount > 15) {
-            relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อแผนกให้ชัดเจน เช่น 'ช่างยนต์' หรือ 'ไอที' ครับ";
-        }
+        // ถ้าผลลัพธ์เยอะเกินไป
+        if (matchCount > 15) relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อแผนกให้ชัดเจน เช่น 'ช่างยนต์' หรือ 'ไอที' ครับ";
         // -----------------------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
@@ -799,21 +798,21 @@ if (user.step === "done") {
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ
-                    [บริบทผู้ใช้] ชื่อเล่น: ${user.nickName} | แผนก: ${user.department}
-                    [ข้อมูลที่ค้นพบ]
+                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาจากวิทยาลัยเทคนิคสมุทรปราการ
+                    [ข้อมูลบุคลากรที่ค้นพบ]
                     ${relevantTeachers}
-                    [ข้อมูลกายภาพ] พื้นที่ 76 ไร่, อาคาร 26 หลัง, แฟลต 17 หลัง
                     
-                    [กฎการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท"
-                    2. หากมีข้อมูลใน [ข้อมูลที่ค้นพบ] ให้ลิสต์ชื่อและตำแหน่งของทุกคนที่เจอออกมาให้ครบ
-                    3. หากระบุว่า "ไม่พบรายชื่อ" ให้แจ้งว่าไม่พบข้อมูลบุคลากรในระบบ แต่ยังตอบเรื่องพื้นที่หรือเวลาเรียนได้ปกติ
-                    4. ตอบสุภาพ มีหางเสียง ห้ามมโนชื่อครูเองเด็ดขาด` 
+                    [ข้อมูลกายภาพ] พื้นที่ 76 ไร่, อาคาร 26 หลัง, แฟลต 17 หลัง
+                    [ข้อมูลผู้ใช้] ชื่อ: ${user.nickName} | แผนก: ${user.department}
+
+                    [แนวทางการตอบ]
+                    1. หากใน [ข้อมูลบุคลากรที่ค้นพบ] มีรายชื่อ ให้สรุปตอบให้ครบถ้วน ห้ามข้ามรายชื่อเด็ดขาด
+                    2. หากระบบแจ้งว่า "ไม่พบรายชื่อ" ให้ตอบว่าไม่พบในฐานข้อมูล และแนะนำให้ลองพิมพ์ชื่อแผนกเต็มๆ
+                    3. ตอบสุภาพ เป็นกันเอง และห้ามมโนชื่อครูขึ้นเอง` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.3, // ตรึงให้ AI ตอบตาม Facts มากที่สุด
+            temperature: 0.3,
             max_tokens: 600
         });
 
