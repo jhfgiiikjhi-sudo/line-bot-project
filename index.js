@@ -755,33 +755,31 @@ if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- 🚀 ADVANCED SEARCH LOGIC (ฉลาด ยืดหยุ่น และแม่นยำ) ---
+        // --- 🚀 EXPERT SEARCH LOGIC (แก้ปัญหา ช่างยนต์/กราฟิก ไม่เจอ) ---
         let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
         let matchCount = 0;
         
-        // 1. ปรับประโยคคำถามให้เป็น Keyword มาตรฐาน (Normalization)
-        const normalize = (val) => val.toLowerCase()
-            .replace(/\s+/g, '') // ลบช่องว่าง
-            .replace(/(กราฟฟิก|กราฟิก)/g, 'กราฟิก') // บังคับการสะกดคำว่ากราฟิก
-            .replace(/(แผนกวิชา|แผนก|วิชา|ช่าง|การ|ครู|อาจารย์|หัวหน้า|คือใคร|หน่อย|ขอดู|รายชื่อ)/g, '');
+        // ฟังก์ชันช่วยทำความสะอาดคำ (ลบช่องว่าง, ลบคำฟุ่มเฟือย, ปรับมาตรฐานคำ)
+        const clean = (str) => {
+            if (!str) return "";
+            return str.toLowerCase()
+                .replace(/\s+/g, '')
+                .replace(/(กราฟฟิก|กราฟิค|graphic)/g, 'กราฟิก') // มาตรฐานคำว่ากราฟิก
+                .replace(/(แผนกวิชา|แผนก|วิชา|ช่าง|การ|หัวหน้า|คือใคร|ครู|อาจารย์)/g, ''); // ลบคำฟุ่มเฟือย
+        };
 
-        const searchKeyword = normalize(text);
+        const searchKeyword = clean(text);
 
-        if (searchKeyword.length >= 2) { // ค้นหาเมื่อมี keyword 2 ตัวอักษรขึ้นไป
+        if (searchKeyword.length >= 2) { 
             let matchedList = [];
 
             for (const category in teacherData) {
                 teacherData[category].forEach(t => {
-                    // ปรับข้อมูลใน DB ให้เป็นมาตรฐานเดียวกับคำค้นหา
-                    const targetName = normalize(t.name);
-                    const targetPositions = (t.positions ? t.positions.join('') : (t.position || '')).toLowerCase();
-                    const targetCategory = category.toLowerCase();
+                    // รวมข้อมูลทั้งหมดของครูคนนี้มาเช็ค (ชื่อ + ตำแหน่ง + หมวดหมู่)
+                    const fullData = clean(t.name + (t.positions ? t.positions.join('') : (t.position || '')) + category);
 
-                    // เช็คการ Match (ชื่อคน หรือ ตำแหน่ง หรือ หมวดหมู่)
-                    if (targetName.includes(searchKeyword) || 
-                        normalize(targetPositions).includes(searchKeyword) || 
-                        targetCategory.includes(searchKeyword)) {
-                        
+                    // ตรวจสอบว่า Keyword ที่เด็กพิมพ์ (เช่น 'ยนต์') อยู่ในข้อมูลครูคนนี้ไหม
+                    if (fullData.includes(searchKeyword)) {
                         matchedList.push(`- ${t.name} (ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position})`);
                         matchCount++;
                     }
@@ -790,9 +788,9 @@ if (user.step === "done") {
             if (matchCount > 0) relevantTeachers = matchedList.join("\n");
         }
 
-        // ตัดข้อมูลหากเจอเยอะเกินไป (ป้องกัน Token เกินและ AI สับสน)
+        // ป้องกันข้อมูลล้น
         if (matchCount > 15) {
-            relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อแผนกให้ชัดเจนยิ่งขึ้น เช่น 'ช่างยนต์' หรือ 'ไอที' ครับ";
+            relevantTeachers = "พบรายชื่อบุคลากรจำนวนมาก กรุณาระบุชื่อแผนกให้ชัดเจน เช่น 'ช่างยนต์' หรือ 'ไอที' ครับ";
         }
         // -----------------------------------------------------------------------
 
@@ -802,29 +800,20 @@ if (user.step === "done") {
                 { 
                     role: "system", 
                     content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ
-                    [ข้อมูลผู้ใช้]
-                    - ชื่อจริง: ${user.realName || "ไม่ระบุ"} | ชื่อเล่น: ${user.nickName || "น้อง"} | แผนก: ${user.department || "ไม่ระบุ"}
-
-                    [ข้อมูลอ้างอิงวิทยาลัย]
-                    - พื้นที่: 76 ไร่ | อาคาร: 26 หลัง | บ้านพัก: 17 หลัง
-                    - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
-                    - ระบบออนไลน์: ${JSON.stringify(collegeData.onlineSystems)}
-                    
-                    [ข้อมูลบุคลากรที่ค้นพบ]
+                    [บริบทผู้ใช้] ชื่อเล่น: ${user.nickName} | แผนก: ${user.department}
+                    [ข้อมูลที่ค้นพบ]
                     ${relevantTeachers}
-
-                    [แนวทางการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท" เสมอ
-                    2. หากถามถึงครู/อาจารย์: 
-                       - ถ้ามีข้อมูลใน [ข้อมูลบุคลากรที่ค้นพบ] ให้ลิสต์ชื่อและตำแหน่งให้ชัดเจน
-                       - ถ้าไม่พบ (ระบุว่า "ไม่พบรายชื่อ") ให้ขอโทษอย่างสุภาพและแนะนำให้เช็คการสะกดชื่อ
-                    3. หากถามเรื่องเวลาเรียน: ให้แจ้งช่วงเวลา เช้า/บ่าย/ค่ำ ให้ถูกต้อง
-                    4. ห้ามสร้างข้อมูลเท็จหรือแต่งชื่อครูขึ้นเองเด็ดขาด
-                    5. ตอบด้วยความสุภาพ มีหางเสียง และแสดงความเป็นมืออาชีพ` 
+                    [ข้อมูลกายภาพ] พื้นที่ 76 ไร่, อาคาร 26 หลัง, แฟลต 17 หลัง
+                    
+                    [กฎการตอบ]
+                    1. แทนตัวเองว่า "พี่บอท"
+                    2. หากมีข้อมูลใน [ข้อมูลที่ค้นพบ] ให้ลิสต์ชื่อและตำแหน่งของทุกคนที่เจอออกมาให้ครบ
+                    3. หากระบุว่า "ไม่พบรายชื่อ" ให้แจ้งว่าไม่พบข้อมูลบุคลากรในระบบ แต่ยังตอบเรื่องพื้นที่หรือเวลาเรียนได้ปกติ
+                    4. ตอบสุภาพ มีหางเสียง ห้ามมโนชื่อครูเองเด็ดขาด` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.4, // ปรับให้คำตอบนิ่งและแม่นยำขึ้น
+            temperature: 0.3, // ตรึงให้ AI ตอบตาม Facts มากที่สุด
             max_tokens: 600
         });
 
