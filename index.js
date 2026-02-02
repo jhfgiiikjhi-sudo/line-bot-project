@@ -743,6 +743,31 @@ async function handleEvent(event) {
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
+        const teacherData = require("./teacherData"); 
+
+        // --- ระบบกรองข้อมูลบุคลากรแบบเจาะจง (ป้องกันข้อมูลเยอะเกินไป) ---
+        let relevantTeachers = "ไม่พบรายชื่อที่เกี่ยวข้องในฐานข้อมูล";
+        const userInput = text.toLowerCase();
+        let matchCount = 0;
+
+        for (const category in teacherData) {
+            teacherData[category].forEach(t => {
+                // ค้นหาทั้งชื่อครู และชื่อแผนก/ตำแหน่ง
+                const nameMatch = userInput.includes(t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.)/g, "").trim());
+                const deptMatch = t.positions?.some(p => userInput.includes(p.replace("แผนกวิชา", "").trim())) || 
+                                 (t.position && userInput.includes(t.position.replace("แผนกวิชา", "").trim()));
+
+                if (nameMatch || deptMatch) {
+                    if (matchCount === 0) relevantTeachers = "";
+                    relevantTeachers += `\n- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`;
+                    matchCount++;
+                }
+            });
+        }
+        // ถ้าเจอเยอะเกิน 10 คน ให้บอก AI ว่าให้แจ้งให้นักเรียนระบุแผนกให้ชัดเจน
+        if (matchCount > 10) relevantTeachers = "พบรายชื่อจำนวนมาก กรุณาบอกชื่อแผนกหรือชื่อครูที่ต้องการทราบให้ชัดเจนเพื่อข้อมูลที่แม่นยำ";
+        // ---------------------------------------------------------
+
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
@@ -755,18 +780,35 @@ if (user.step === "done") {
                     - อายุ: ${user.age || "ไม่ระบุ"} ปี
                     - แผนก: ${user.department || "ไม่ระบุ"}
                     - วันเกิด: ${user.birthday || "ไม่ได้ลงทะเบียนไว้"}
+
+                    [ข้อมูลอ้างอิงวิทยาลัย]
+                    - พื้นที่วิทยาลัย: ${collegeData.physicalInfo?.area || "76 ไร่"}
+                    - จำนวนอาคาร: ${collegeData.physicalInfo?.buildings || "อาคารเรียนและปฏิบัติการ 26 หลัง"}
+                    - บ้านพักบุคลากร: ${collegeData.physicalInfo?.housing || "17 หลัง"}
+                    - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
+                    - ระบบออนไลน์: ${JSON.stringify(collegeData.onlineSystems)}
+                    
+                    [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม]
+                    ${relevantTeachers}
+
                     [บริบทสำคัญ]
                     - วันนี้คือ: ${dateStr}
                     - ข่าวล่าสุด: ${global.latestNewsTitle || "ไม่มีข่าวใหม่"}
-                    - ข้อมูลวิทยาลัย: ${JSON.stringify(collegeData)}
+                    - ข้อมูลทั่วไปวิทยาลัย: ${JSON.stringify(collegeData)}
                     - ข้อมูลอ้างอิงอื่นๆ (นายก/จังหวัด): ${JSON.stringify(officialFacts)} 
+
                     [แนวทางการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท" 2. ใช้ข้อมูลจาก [ข้อมูลอ้างอิงอื่นๆ] ในการตอบคำถามทั่วไป 3. ตอบสุภาพมีหางเสียง` 
+                    1. แทนตัวเองว่า "พี่บอท" 
+                    2. หากถามถึงพื้นที่หรืออาคาร ให้ใช้ข้อมูลจาก [ข้อมูลอ้างอิงวิทยาลัย]
+                    3. หากนักเรียนถามถึงครู/อาจารย์ ให้ดึงข้อมูลจาก [ข้อมูลอาจารย์ที่ค้นพบตามคำถาม] มาตอบเป็นข้อๆ ให้ดูง่าย
+                    4. หากไม่พบข้อมูลครูในส่วนที่เตรียมไว้ ให้แจ้งนักเรียนว่า "พี่บอทไม่พบรายชื่อครูหรือแผนกนี้ในระบบเบื้องต้นครับ ลองตรวจสอบชื่ออีกครั้งนะ"
+                    5. หากถามเรื่องเวลาเรียน ให้แจ้งช่วงเวลา เช้า/บ่าย/ค่ำ ให้ชัดเจน
+                    6. ตอบสุภาพ มีหางเสียง และห้ามดัดแปลงข้อมูลหรือคิดชื่อครูขึ้นเองเด็ดขาด` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.7,
-            max_tokens: 500
+            temperature: 0.5,
+            max_tokens: 600
         });
         return reply(event, aiResponse.choices[0].message.content);
     } catch (e) {
