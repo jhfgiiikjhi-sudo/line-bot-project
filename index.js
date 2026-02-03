@@ -750,85 +750,98 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini)
+    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับปรับปรุงรองรับ teacherData แบบกลุ่มแผนก
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- 🚀 ULTIMATE SEARCH ENGINE (ฉบับมืออาชีพ) ---
-        let matchedTeachers = [];
-        const rawInput = text.toLowerCase().trim();
+        // --- ระบบกรองข้อมูลบุคลากรแบบกลุ่มแผนก (รองรับโครงสร้างใหม่) ---
+        let relevantTeachers = "ไม่พบรายชื่อหรือแผนกที่เกี่ยวข้องในฐานข้อมูล";
+        const userInput = text.toLowerCase().trim();
         
-        // ฟังก์ชันล้างคำให้เหลือแต่แก่น (เช่น แผนกวิชาช่างยนต์ -> ยนต์)
-        const normalize = (str) => {
-            if (!str) return "";
-            return str.toLowerCase()
-                .replace(/\s+/g, '')
-                .replace(/(แผนกวิชา|แผนก|วิชา|ช่าง|การ|ครู|อาจารย์|หัวหน้า|คือใคร|หน่อย|ขอดู|รายชื่อ)/g, '')
-                .replace(/(กราฟฟิก|กราฟิค|graphic)/g, 'กราฟิก'); // ปรับมาตรฐานคำว่ากราฟิก
-        };
+        // ล้าง Keyword เพื่อใช้เช็คชื่อแผนกหรือตำแหน่ง
+        const searchKeyword = userInput.replace(/(แผนกวิชา|ช่าง|การ|วิชา|งาน)/g, "").trim();
+        let matchCount = 0;
+        let foundData = [];
 
-        const searchKeyword = normalize(rawInput);
+        for (const category in teacherData) {
+            // 1. เช็คว่าผู้ใช้พิมพ์ชื่อแผนกโดยตรงหรือไม่ (เช่น "โยธา", "ไฟฟ้า", "ไอที")
+            const categoryClean = category.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
+            const isCategoryMatch = searchKeyword !== "" && (categoryClean.includes(searchKeyword) || searchKeyword.includes(categoryClean));
 
-        // ค้นหาข้อมูลครู (เฉพาะเมื่อมี keyword 2 ตัวอักษรขึ้นไป)
-        if (searchKeyword.length >= 2) {
-            for (const category in teacherData) {
-                teacherData[category].forEach(t => {
-                    const teacherName = normalize(t.name);
-                    const teacherPos = normalize(t.positions ? t.positions.join(" ") : (t.position || ""));
-                    const catName = normalize(category);
+            teacherData[category].forEach(t => {
+                // 2. ล้างคำนำหน้าชื่อเพื่อเช็คชื่อครู
+                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim();
+                const isNameMatch = userInput.includes(cleanName.toLowerCase());
 
-                    // ถ้า Keyword ตรงกับชื่อ, ตำแหน่ง หรือแผนก
-                    if (teacherName.includes(searchKeyword) || teacherPos.includes(searchKeyword) || catName.includes(searchKeyword)) {
-                        matchedTeachers.push(`- ${t.name} | ตำแหน่ง: ${t.positions ? t.positions.join(", ") : t.position}`);
-                    }
-                });
-            }
+                // 3. เช็คตำแหน่งภายใน (Positions Array)
+                const isPosMatch = t.positions?.some(p => {
+                    const cleanP = p.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
+                    return searchKeyword !== "" && (cleanP.includes(searchKeyword) || searchKeyword.includes(cleanP));
+                }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
+
+                // ถ้าตรงเงื่อนไขข้อใดข้อหนึ่ง ให้เก็บข้อมูลไว้
+                if (isNameMatch || isPosMatch || isCategoryMatch) {
+                    const posDisplay = t.positions ? t.positions.join(", ") : t.position;
+                    foundData.push(`- ${t.name} (แผนก: ${category}) | ตำแหน่ง: ${posDisplay}`);
+                    matchCount++;
+                }
+            });
         }
 
-        // เตรียม Context สำหรับ AI
-        let teacherContext = matchedTeachers.length > 0 
-            ? matchedTeachers.join("\n") 
-            : "ไม่พบรายชื่อครูหรือแผนกนี้ในฐานข้อมูล (ให้แจ้งผู้ใช้ว่าไม่พบข้อมูลและตรวจสอบการสะกด)";
-
-        if (matchedTeachers.length > 15) {
-            teacherContext = "พบรายชื่อจำนวนมาก กรุณาระบุชื่อแผนกให้เจาะจง เช่น 'หัวหน้าแผนกช่างยนต์'";
+        if (matchCount > 0) {
+            relevantTeachers = foundData.join("\n");
         }
-        // ----------------------------------------------
+        
+        // ถ้าเจอเยอะเกิน 15 คน (กรณีพิมพ์แค่คำว่า "ครู") ให้แจ้งให้ระบุเจาะจง
+        if (matchCount > 15) {
+            relevantTeachers = `พบข้อมูลบุคลากร ${matchCount} ท่าน ซึ่งมากเกินไป กรุณาระบุชื่อครูหรือชื่อแผนกที่น้อง ${user.nickName} สนใจให้ชัดเจนกว่านี้หน่อยครับ พี่บอทจะช่วยหาให้ใหม่!`;
+        }
+        // ---------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ
-                    [ข้อมูลผู้ใช้]
-                    - ชื่อจริง: ${user.realName || "ไม่ระบุ"} | ชื่อเล่น: ${user.nickName || "น้อง"}
-                    - แผนก: ${user.department || "ไม่ระบุ"}
+                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ (SPTC)
                     
+                    [ข้อมูลผู้ใช้]
+                    - ชื่อจริง: ${user.realName || "ไม่ระบุ"}
+                    - ชื่อเล่น: ${user.nickName || "น้อง"}
+                    - แผนกที่เรียน: ${user.department || "ไม่ระบุ"}
+
                     [ข้อมูลอ้างอิงวิทยาลัย]
-                    - พื้นที่: 76 ไร่ | อาคารเรียน: 26 หลัง | บ้านพัก: 17 หลัง
+                    - พื้นที่: ${collegeData.physicalInfo?.area || "76 ไร่"}
+                    - อาคารเรียน: ${collegeData.physicalInfo?.buildings || "26 หลัง"}
                     - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
-                    - ข้อมูลวิทยาลัยทั่วไป: ${JSON.stringify(collegeData)}
-                    - ข้อมูลอ้างอิงอื่นๆ: ${JSON.stringify(officialFacts)}
+                    - ระบบออนไลน์: ${JSON.stringify(collegeData.onlineSystems)}
+                    
+                    [ข้อมูลบุคลากรที่ค้นพบ]
+                    ${relevantTeachers}
 
-                    [ข้อมูลบุคลากรที่ค้นพบตามคำถาม]
-                    ${teacherContext}
+                    [บริบทปัจจุบัน]
+                    - วันนี้: ${dateStr}
+                    - ข่าวสารล่าสุด: ${global.latestNewsTitle || "ไม่มีประกาศใหม่ในขณะนี้"}
+                    - ข้อมูลพื้นฐานวิทยาลัย: ${JSON.stringify(collegeData)}
+                    - ข้อมูลราชการ/จังหวัด: ${JSON.stringify(officialFacts)} 
 
-                    [แนวทางการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท" และลงท้ายด้วย "ครับ/ค่ะ"
-                    2. หากมีรายชื่อใน [ข้อมูลบุคลากรที่ค้นพบ] ให้สรุปออกมาเป็นข้อๆ ให้ครบถ้วน ห้ามข้ามเด็ดขาด
-                    3. หากไม่พบรายชื่อ ให้บอกอย่างสุภาพว่าไม่พบในระบบ และแนะนำให้ตรวจสอบการสะกดชื่อแผนก
-                    4. ห้ามแต่งชื่อครูขึ้นเองเด็ดขาด และยึดข้อมูลตามที่ให้ไว้เท่านั้น` 
+                    [กฎการตอบ]
+                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง (ตามด้วยชื่อเล่น)"
+                    2. หากถามถึงครู/อาจารย์:
+                       - ให้สรุปรายชื่อที่พบจาก [ข้อมูลบุคลากรที่ค้นพบ] 
+                       - หากเจอหลายแผนก ให้แยกเป็นหัวข้อแผนกให้ชัดเจน
+                    3. หากไม่พบรายชื่อ: ให้ตอบอย่างสุภาพว่า "พี่บอทค้นหาในระบบไม่เจอครับ" และแนะนำให้เช็คตัวสะกด หรือบอกชื่อแผนกแทน
+                    4. ห้าม "มโน" หรือสร้างชื่อครู/ตำแหน่งขึ้นมาเองเด็ดขาด ถ้าไม่มีในฐานข้อมูลให้บอกว่าไม่มี
+                    5. ตอบด้วยภาษาที่เป็นกันเอง สุภาพ มีหางเสียง (ครับ) เหมือนพี่ชายคุยกับน้อง` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.4,
-            max_tokens: 800
+            temperature: 0.6, // เพิ่มความยืดหยุ่นในการตอบให้น่ารักขึ้น
+            max_tokens: 700
         });
 
         return reply(event, aiResponse.choices[0].message.content);
-
     } catch (e) {
         console.error("AI Error:", e);
         return reply(event, `ขออภัยครับน้อง ${user.nickName} พี่บอทมึนหัวนิดหน่อย รบกวนถามใหม่อีกครั้งนะ 🤖`);
