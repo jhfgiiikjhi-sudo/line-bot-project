@@ -750,7 +750,7 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับแก้ไขปัญหา "ช่างยนต์" และ "การบัญชี"
+    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับแก้ไขปัญหา "ช่างยนต์" (Final Fix)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
@@ -758,29 +758,32 @@ if (user.step === "done") {
         let relevantTeachers = "ไม่พบรายชื่อหรือแผนกที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase().trim();
         
-        // ล้าง Keyword แบบถนอมคำ (ไม่ตัดคำว่า 'ช่าง' หรือ 'การ' ออกพร่ำเพรื่อในการเช็คแผนก)
-        const searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ)/g, "").trim();
+        // 1. สร้าง Keyword สำหรับค้นหาแบบไม่ตัดคำสำคัญ (เก็บคำว่า 'ช่าง' และ 'การ' ไว้)
+        const searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ)/g, "").trim();
         
-        let matchCount = 0;
         let foundData = [];
+        let matchCount = 0;
 
         for (const category in teacherData) {
             const categoryLower = category.toLowerCase();
-            // ตัดคำว่า "แผนกวิชา" ออกเพื่อหาใจความสำคัญ เช่น "ช่างยนต์", "การบัญชี"
+            // ล้างชื่อแผนกเพื่อหาคำสำคัญ (เช่น "แผนกวิชาช่างยนต์" -> "ช่างยนต์")
             const categoryCore = categoryLower.replace("แผนกวิชา", "").trim();
 
-            // 1. เช็คหมวดหมู่ (Category Match) - เช็คว่าคำที่พิมพ์มา มีส่วนใดส่วนหนึ่งตรงกับชื่อแผนกไหม
-            const isCategoryMatch = (searchKeyword !== "" && (categoryLower.includes(searchKeyword) || searchKeyword.includes(categoryCore)));
+            // --- Logic การ Match แผนกแบบใหม่ ---
+            // A: น้องพิมพ์คำที่อยู่ในชื่อแผนก (เช่น พิมพ์ "ช่างยนต์" ในขณะที่แผนกชื่อ "แผนกวิชาช่างยนต์")
+            // B: ชื่อแผนกมีอยู่ในประโยคที่น้องพิมพ์
+            const isCategoryMatch = (searchKeyword.length >= 2 && categoryCore.includes(searchKeyword)) || 
+                                   (userInput.includes(categoryCore));
 
             teacherData[category].forEach(t => {
-                // 2. เช็คชื่อครู
+                // 2. เช็คชื่อครู (ล้างคำนำหน้าออก)
                 const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
                 const isNameMatch = userInput.includes(cleanName);
 
-                // 3. เช็คจากตำแหน่ง (Positions)
+                // 3. เช็คจากตำแหน่งภายใน
                 const isPosMatch = t.positions?.some(p => {
                     const pLower = p.toLowerCase();
-                    return searchKeyword !== "" && pLower.includes(searchKeyword);
+                    return searchKeyword.length >= 2 && pLower.includes(searchKeyword);
                 }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
 
                 if (isNameMatch || isPosMatch || isCategoryMatch) {
@@ -790,7 +793,7 @@ if (user.step === "done") {
             });
         }
 
-        // กรองข้อมูลที่ซ้ำกันออก (ป้องกันกรณีเจอทั้งจากชื่อและแผนก)
+        // กรองชื่อซ้ำ
         const uniqueResults = [...new Set(foundData)];
         matchCount = uniqueResults.length;
 
@@ -798,8 +801,8 @@ if (user.step === "done") {
             relevantTeachers = uniqueResults.join("\n");
         }
         
-        if (matchCount > 15) {
-            relevantTeachers = `พบข้อมูลบุคลากรทั้งหมด ${matchCount} ท่าน ซึ่งเยอะเกินไปนิดนึงครับ น้อง ${user.nickName} ช่วยระบุชื่อครู หรือชื่อแผนกให้เจาะจงกว่านี้อีกหน่อย พี่บอทจะหาให้ใหม่แบบแม่นๆ เลย!`;
+        if (matchCount > 20) {
+            relevantTeachers = `พบข้อมูลบุคลากรทั้งหมด ${matchCount} ท่าน ซึ่งเยอะเกินไปครับ น้อง ${user.nickName} ช่วยระบุชื่อครูหรือแผนกให้ชัดเจนขึ้นอีกนิด พี่บอทจะหาให้ใหม่ครับ!`;
         }
         // ---------------------------------------------------------
 
