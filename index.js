@@ -750,37 +750,43 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับปรับปรุงรองรับ teacherData แบบกลุ่มแผนก
+    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับปรับปรุงใหม่ (Fix Search & Category Match)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         
-        // --- ระบบกรองข้อมูลบุคลากรแบบกลุ่มแผนก (รองรับโครงสร้างใหม่) ---
+        // --- ระบบกรองข้อมูลบุคลากรแบบกลุ่มแผนก (รองรับโครงสร้างใหม่ 100%) ---
         let relevantTeachers = "ไม่พบรายชื่อหรือแผนกที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase().trim();
         
-        // ล้าง Keyword เพื่อใช้เช็คชื่อแผนกหรือตำแหน่ง
-        const searchKeyword = userInput.replace(/(แผนกวิชา|ช่าง|การ|วิชา|งาน)/g, "").trim();
+        // สร้าง Keyword สำหรับค้นหา (ตัดคำฟุ่มเฟือยออกเพื่อให้เจอคำว่า "ยนต์", "ไฟฟ้า", "บัญชี")
+        const searchKeyword = userInput.replace(/(แผนกวิชา|ช่าง|การวิชา|งาน|แผนก)/g, "").trim();
+        
         let matchCount = 0;
         let foundData = [];
 
         for (const category in teacherData) {
-            // 1. เช็คว่าผู้ใช้พิมพ์ชื่อแผนกโดยตรงหรือไม่ (เช่น "โยธา", "ไฟฟ้า", "ไอที")
-            const categoryClean = category.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-            const isCategoryMatch = searchKeyword !== "" && (categoryClean.includes(searchKeyword) || searchKeyword.includes(categoryClean));
+            const categoryLower = category.toLowerCase();
+            // ล้างชื่อแผนกให้เหลือแต่ใจความ (เช่น "แผนกวิชาช่างยนต์" -> "ยนต์")
+            const categoryClean = categoryLower.replace(/(แผนกวิชา|ช่าง|การวิชา|แผนก)/g, "").trim();
+
+            // 1. เช็คหมวดหมู่ (Category Match): เช็คทั้งคำเต็มและคำที่ล้างแล้ว
+            const isCategoryMatch = (searchKeyword !== "" && (categoryClean.includes(searchKeyword) || searchKeyword.includes(categoryClean))) ||
+                                   (userInput.includes(categoryLower));
 
             teacherData[category].forEach(t => {
-                // 2. ล้างคำนำหน้าชื่อเพื่อเช็คชื่อครู
-                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim();
-                const isNameMatch = userInput.includes(cleanName.toLowerCase());
+                // 2. เช็คชื่อครู: ล้างคำนำหน้าออกเพื่อให้ค้นหาด้วยชื่อจริงได้แม่นยำ
+                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
+                const isNameMatch = userInput.includes(cleanName);
 
-                // 3. เช็คตำแหน่งภายใน (Positions Array)
+                // 3. เช็คตำแหน่ง/แผนกข้างใน (Positions Match)
                 const isPosMatch = t.positions?.some(p => {
-                    const cleanP = p.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-                    return searchKeyword !== "" && (cleanP.includes(searchKeyword) || searchKeyword.includes(cleanP));
+                    const pLower = p.toLowerCase();
+                    const cleanP = pLower.replace(/(แผนกวิชา|ช่าง|การวิชา|งาน|แผนก)/g, "").trim();
+                    return searchKeyword !== "" && (cleanP.includes(searchKeyword) || pLower.includes(userInput));
                 }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
 
-                // ถ้าตรงเงื่อนไขข้อใดข้อหนึ่ง ให้เก็บข้อมูลไว้
+                // รวมผลลัพธ์
                 if (isNameMatch || isPosMatch || isCategoryMatch) {
                     const posDisplay = t.positions ? t.positions.join(", ") : t.position;
                     foundData.push(`- ${t.name} (แผนก: ${category}) | ตำแหน่ง: ${posDisplay}`);
@@ -789,13 +795,16 @@ if (user.step === "done") {
             });
         }
 
+        // จัดการผลลัพธ์การค้นหา
         if (matchCount > 0) {
-            relevantTeachers = foundData.join("\n");
+            // ใช้ Set เพื่อป้องกันกรณีชื่อซ้ำจากการ Match หลายเงื่อนไข
+            const uniqueResults = [...new Set(foundData)];
+            relevantTeachers = uniqueResults.join("\n");
+            matchCount = uniqueResults.length;
         }
         
-        // ถ้าเจอเยอะเกิน 15 คน (กรณีพิมพ์แค่คำว่า "ครู") ให้แจ้งให้ระบุเจาะจง
         if (matchCount > 15) {
-            relevantTeachers = `พบข้อมูลบุคลากร ${matchCount} ท่าน ซึ่งมากเกินไป กรุณาระบุชื่อครูหรือชื่อแผนกที่น้อง ${user.nickName} สนใจให้ชัดเจนกว่านี้หน่อยครับ พี่บอทจะช่วยหาให้ใหม่!`;
+            relevantTeachers = `พบข้อมูลบุคลากรในระบบถึง ${matchCount} ท่าน เพื่อความรวดเร็ว น้อง ${user.nickName} ช่วยระบุชื่อครู หรือชื่อแผนกที่เจาะจงกว่านี้หน่อยได้ไหมครับ พี่บอทจะช่วยหาให้ใหม่ทันที!`;
         }
         // ---------------------------------------------------------
 
@@ -809,7 +818,9 @@ if (user.step === "done") {
                     [ข้อมูลผู้ใช้]
                     - ชื่อจริง: ${user.realName || "ไม่ระบุ"}
                     - ชื่อเล่น: ${user.nickName || "น้อง"}
-                    - แผนกที่เรียน: ${user.department || "ไม่ระบุ"}
+                    - อายุ: ${user.age || "ไม่ระบุ"} ปี
+                    - แผนก: ${user.department || "ไม่ระบุ"}
+                    - วันเกิด: ${user.birthday || "ไม่ได้ลงทะเบียนไว้"}
 
                     [ข้อมูลอ้างอิงวิทยาลัย]
                     - พื้นที่: ${collegeData.physicalInfo?.area || "76 ไร่"}
