@@ -750,40 +750,41 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับแก้ไขปัญหา "ช่างยนต์" (Final Fix)
+    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับอัปเกรด (รองรับคำถามจำนวนคน, หัวหน้า และบริบทต่อเนื่อง)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
-        
-        let relevantTeachers = "ไม่พบรายชื่อหรือแผนกที่เกี่ยวข้องในฐานข้อมูล";
         const userInput = text.toLowerCase().trim();
         
-        // 1. สร้าง Keyword สำหรับค้นหาแบบไม่ตัดคำสำคัญ (เก็บคำว่า 'ช่าง' และ 'การ' ไว้)
-        const searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ)/g, "").trim();
+        // 1. สร้างสรุปจำนวนครูแต่ละแผนก (เพื่อให้ AI ตอบคำถาม "กี่คน" ได้แม่นยำ)
+        let deptStats = {};
+        for (const cat in teacherData) {
+            deptStats[cat] = teacherData[cat].length;
+        }
+
+        // 2. ล้าง Keyword สำหรับค้นหา (ตัดคำถามเชิงปริมาณออกเพื่อให้เหลือชื่อแผนก/ครู)
+        const searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ|มีกี่คน|กี่คน|ใครคือ|ใครเป็น)/g, "").trim();
         
         let foundData = [];
         let matchCount = 0;
 
         for (const category in teacherData) {
             const categoryLower = category.toLowerCase();
-            // ล้างชื่อแผนกเพื่อหาคำสำคัญ (เช่น "แผนกวิชาช่างยนต์" -> "ช่างยนต์")
             const categoryCore = categoryLower.replace("แผนกวิชา", "").trim();
 
-            // --- Logic การ Match แผนกแบบใหม่ ---
-            // A: น้องพิมพ์คำที่อยู่ในชื่อแผนก (เช่น พิมพ์ "ช่างยนต์" ในขณะที่แผนกชื่อ "แผนกวิชาช่างยนต์")
-            // B: ชื่อแผนกมีอยู่ในประโยคที่น้องพิมพ์
-            const isCategoryMatch = (searchKeyword.length >= 2 && categoryCore.includes(searchKeyword)) || 
-                                   (userInput.includes(categoryCore));
+            // Match แผนก: ถ้าพิมพ์คำที่ตรงกับชื่อแผนก หรือชื่อแผนกมีอยู่ในประโยค
+            const isCategoryMatch = (searchKeyword.length >= 2 && (categoryLower.includes(searchKeyword) || searchKeyword.includes(categoryCore))) || 
+                                   (userInput.includes(categoryCore) && categoryCore.length >= 2);
 
             teacherData[category].forEach(t => {
-                // 2. เช็คชื่อครู (ล้างคำนำหน้าออก)
+                // ล้างคำนำหน้าชื่อ
                 const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
-                const isNameMatch = userInput.includes(cleanName);
+                const isNameMatch = userInput.includes(cleanName) && cleanName.length > 2;
 
-                // 3. เช็คจากตำแหน่งภายใน
+                // Match ตำแหน่ง (รองรับคำว่า 'หัวหน้า', 'พนักงานราชการ', 'ครูอัตราจ้าง')
                 const isPosMatch = t.positions?.some(p => {
                     const pLower = p.toLowerCase();
-                    return searchKeyword.length >= 2 && pLower.includes(searchKeyword);
+                    return (searchKeyword.length >= 2 && pLower.includes(searchKeyword));
                 }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
 
                 if (isNameMatch || isPosMatch || isCategoryMatch) {
@@ -796,14 +797,7 @@ if (user.step === "done") {
         // กรองชื่อซ้ำ
         const uniqueResults = [...new Set(foundData)];
         matchCount = uniqueResults.length;
-
-        if (matchCount > 0) {
-            relevantTeachers = uniqueResults.join("\n");
-        }
-        
-        if (matchCount > 20) {
-            relevantTeachers = `พบข้อมูลบุคลากรทั้งหมด ${matchCount} ท่าน ซึ่งเยอะเกินไปครับ น้อง ${user.nickName} ช่วยระบุชื่อครูหรือแผนกให้ชัดเจนขึ้นอีกนิด พี่บอทจะหาให้ใหม่ครับ!`;
-        }
+        const relevantTeachers = matchCount > 0 ? uniqueResults.join("\n") : "ไม่พบรายชื่อที่ระบุในฐานข้อมูล";
         // ---------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
