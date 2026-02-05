@@ -750,41 +750,64 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับอัปเกรด (รองรับคำถามจำนวนคน, หัวหน้า และบริบทต่อเนื่อง)
+    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับฉลาดพิเศษ (เข้าใจคำย่อ + ค้นหาจากโปรไฟล์ผู้ใช้)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         const userInput = text.toLowerCase().trim();
         
-        // 1. สร้างสรุปจำนวนครูแต่ละแผนก (เพื่อให้ AI ตอบคำถาม "กี่คน" ได้แม่นยำ)
+        // 1. ตารางคำย่อ (Synonyms) เพื่อให้บอทเข้าใจภาษาพูดที่เด็กใช้
+        const deptSynonyms = {
+            "ไอที": "เทคโนโลยีสารสนเทศ",
+            "it": "เทคโนโลยีสารสนเทศ",
+            "คอม": "เทคโนโลยีธุรกิจดิจิทัล",
+            "ดิจิทัล": "เทคโนโลยีธุรกิจดิจิทัล",
+            "โยธา": "ช่างโยธา",
+            "ยนต์": "ช่างยนต์",
+            "ไฟฟ้า": "ช่างไฟฟ้ากำลัง",
+            "อิเล็ก": "ช่างอิเล็กทรอนิกส์",
+            "เชื่อม": "ช่างเชื่อมและโลหะแผ่น",
+            "กล": "ช่างกลโรงงานและแม่พิมพ์"
+        };
+
+        // 2. สร้างสรุปจำนวนครูแต่ละแผนก
         let deptStats = {};
         for (const cat in teacherData) {
             deptStats[cat] = teacherData[cat].length;
         }
 
-        // 2. ล้าง Keyword สำหรับค้นหา (ตัดคำถามเชิงปริมาณออกเพื่อให้เหลือชื่อแผนก/ครู)
-        const searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ|มีกี่คน|กี่คน|ใครคือ|ใครเป็น)/g, "").trim();
+        // 3. เตรียม Keyword ค้นหา
+        let searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ|มีกี่คน|กี่คน|ใครคือ|ใครเป็น|ใครคือหัวหน้า)/g, "").trim();
         
-        let foundData = [];
-        let matchCount = 0;
+        // --- ระบบอัจฉริยะ: ถ้าถามถึง "แผนกผม" ให้ดึงชื่อแผนกจากโปรไฟล์น้องมาค้นหาทันที ---
+        if (userInput.includes("แผนกผม") || userInput.includes("แผนกที่ผมเรียน") || userInput.includes("แผนกของผม")) {
+            const userDept = user.department || "";
+            searchKeyword = userDept.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
+        }
 
+        // แปลงคำย่อจากตาราง Synonym (ถ้ามี)
+        for (const [short, full] of Object.entries(deptSynonyms)) {
+            if (searchKeyword.includes(short)) {
+                searchKeyword = full.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
+                break;
+            }
+        }
+
+        let foundData = [];
         for (const category in teacherData) {
             const categoryLower = category.toLowerCase();
-            const categoryCore = categoryLower.replace("แผนกวิชา", "").trim();
+            const categoryCore = categoryLower.replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
 
-            // Match แผนก: ถ้าพิมพ์คำที่ตรงกับชื่อแผนก หรือชื่อแผนกมีอยู่ในประโยค
-            const isCategoryMatch = (searchKeyword.length >= 2 && (categoryLower.includes(searchKeyword) || searchKeyword.includes(categoryCore))) || 
-                                   (userInput.includes(categoryCore) && categoryCore.length >= 2);
+            // Match แผนก (เช็คทั้งแบบคำย่อและคำเต็ม)
+            const isCategoryMatch = (searchKeyword.length >= 2 && (categoryLower.includes(searchKeyword) || searchKeyword.includes(categoryCore)));
 
             teacherData[category].forEach(t => {
-                // ล้างคำนำหน้าชื่อ
                 const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
                 const isNameMatch = userInput.includes(cleanName) && cleanName.length > 2;
 
-                // Match ตำแหน่ง (รองรับคำว่า 'หัวหน้า', 'พนักงานราชการ', 'ครูอัตราจ้าง')
                 const isPosMatch = t.positions?.some(p => {
                     const pLower = p.toLowerCase();
-                    return (searchKeyword.length >= 2 && pLower.includes(searchKeyword));
+                    return (searchKeyword.length >= 2 && (pLower.includes(searchKeyword) || searchKeyword.includes(pLower.replace("แผนกวิชา", "").trim())));
                 }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
 
                 if (isNameMatch || isPosMatch || isCategoryMatch) {
@@ -794,10 +817,9 @@ if (user.step === "done") {
             });
         }
 
-        // กรองชื่อซ้ำ
         const uniqueResults = [...new Set(foundData)];
-        matchCount = uniqueResults.length;
-        const relevantTeachers = matchCount > 0 ? uniqueResults.join("\n") : "ไม่พบรายชื่อที่ระบุในฐานข้อมูล";
+        const matchCount = uniqueResults.length;
+        const relevantTeachers = matchCount > 0 ? uniqueResults.join("\n") : "ไม่พบรายชื่อที่ระบุในฐานข้อมูล teacherData";
         // ---------------------------------------------------------
 
         const aiResponse = await openai.chat.completions.create({
@@ -820,6 +842,9 @@ if (user.step === "done") {
                     - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
                     - ระบบออนไลน์: ${JSON.stringify(collegeData.onlineSystems)}
                     
+                    [สถิติจำนวนบุคลากรแต่ละแผนก]
+                    ${JSON.stringify(deptStats)}
+
                     [ข้อมูลบุคลากรที่ค้นพบ]
                     ${relevantTeachers}
 
