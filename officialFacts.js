@@ -1,5 +1,5 @@
 module.exports = {
-  primeMinister: "เศรษฐา ทวีสิน",
+  primeMinister: "อนุทิน ชาญวีรกูล",
   capital: "กรุงเทพมหานคร",
   currency: "บาท",
   emergency: {
@@ -8,3 +8,4 @@ module.exports = {
     fire: "199",
   },
 };
+
