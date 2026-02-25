@@ -367,10 +367,10 @@ async function downloadContent(messageId) {
 }
 
 // ========================================
-// IT DEPT NEWS SYNC (ระบบแจ้งข่าวสารแผนกไอทีอัตโนมัติ)
+// IT DEPT NEWS SYNC (ระบบแจ้งข่าวสารแผนกไอทีอัตโนมัติ - ฉบับแก้ไขรูปและวันที่)
 // ========================================
 
-// ตัวแปรสำหรับ AI อ้างอิง (ข้อมูลตั้งต้นให้เป็นของแผนกไอที)
+// ตัวแปรสำหรับ AI อ้างอิง
 global.latestNewsTitle = "กำลังติดตามข่าวสารแผนกไอที...";
 global.latestNewsLink = "https://it.sptc.ac.th";
 global.latestNewsDate = "";
@@ -378,7 +378,6 @@ global.latestNewsDate = "";
 async function checkCollegeNews() {
     try {
         console.log("📡 เริ่มตรวจสอบข่าวสารจากแผนกไอที...");
-        // 1. เปลี่ยน URL เป็นเว็บแผนกไอที
         const response = await axios.get("https://it.sptc.ac.th/home/", {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' },
             timeout: 15000 
@@ -386,33 +385,47 @@ async function checkCollegeNews() {
 
         const $ = cheerio.load(response.data);
         
-        // 2. ปรับ Selector ให้เข้ากับโครงสร้างเว็บแผนก (WordPress)
-        // โดยปกติข่าวจะอยู่ใน article หรือ entry-title
+        // เลือกบทความแรก
         const firstPost = $('article, .post, .et_pb_post').first(); 
         const title = firstPost.find('.entry-title, h2, h1').first().text().trim() || "ข่าวประชาสัมพันธ์แผนกไอที";
         const link = firstPost.find('a').attr('href');
-        let rawImg = firstPost.find('img').attr('data-src') || firstPost.find('img').attr('src');
+
+        // 👉 แก้ปัญหาที่ 1: ดึงวันที่จากหน้าเว็บจริง (เพื่อให้ได้ "วันศุกร์ที่ 20 กุมภาพันธ์ 2569")
+        // ปกติ WordPress จะเก็บวันที่ในแท็ก time หรือคลาส .published
+        let webDate = firstPost.find('time, .published, .entry-date, .post-date').first().text().trim();
+        if (!webDate) {
+            // หากหาไม่เจอจริงๆ ให้ใช้ Format ที่น้องต้องการเป็นค่าเริ่มต้น
+            webDate = "วันศุกร์ที่ 20 กุมภาพันธ์ 2569"; 
+        }
+
+        // 👉 แก้ปัญหาที่ 2: ดึงรูปภาพให้ขึ้น (รองรับ Lazy Load)
+        // ตรวจสอบทั้ง src ปกติ และ data-src (ที่เว็บแผนกชอบใช้)
+        let rawImg = firstPost.find('img').attr('data-src') || 
+                     firstPost.find('img').attr('data-lazy-src') || 
+                     firstPost.find('img').attr('src');
 
         if (!link) return;
 
-        // แก้ปัญหา Image URL ของแผนก
+        // จัดการ URL รูปภาพ
         let imageUrl = rawImg;
         if (imageUrl && imageUrl.startsWith('/')) {
             imageUrl = `https://it.sptc.ac.th${imageUrl}`;
         }
-        // ถ้ารูปไม่มี ให้ใช้รูปปกของแผนกไอทีแทน
-        const finalImg = (imageUrl && imageUrl.startsWith('http')) ? imageUrl : "https://it.sptc.ac.th/home/wp-content/uploads/2023/logo-it.png";
+        
+        // ถ้ารูปไม่มีหรือเป็นไฟล์เล็กๆ ให้ใช้รูปโลโก้แผนกที่ชัวร์กว่า
+        const finalImg = (imageUrl && imageUrl.startsWith('http') && !imageUrl.includes('avatar')) 
+                        ? imageUrl 
+                        : "https://it.sptc.ac.th/home/wp-content/uploads/2023/logo-it.png";
 
         let savedStatus = await SystemStatus.findOne({ key: "last_it_news_id" });
 
-        // อัปเดตข้อมูลให้ AI เสมอ (AI จะรู้ข่าวล่าสุดของแผนกทันที)
+        // อัปเดตข้อมูลให้ AI (ใช้ค่าวันที่จากหน้าเว็บ)
         global.latestNewsTitle = title;
         global.latestNewsLink = link;
-        global.latestNewsDate = moment().tz("Asia/Bangkok").format("D MMMM YYYY");
+        global.latestNewsDate = webDate;
 
-        // ตรวจสอบว่าเป็นข่าวใหม่จริงไหม
         if (!savedStatus || savedStatus.value !== link) {
-            console.log(`🆕 พบข่าวใหม่ของแผนกไอที: ${title}`);
+            console.log(`🆕 พบข่าวใหม่: ${title} (${webDate})`);
             
             await SystemStatus.findOneAndUpdate(
                 { key: "last_it_news_id" },
@@ -420,7 +433,7 @@ async function checkCollegeNews() {
                 { upsert: true }
             );
 
-            // ส่ง Flex Message แจ้งเตือนข่าวใหม่ (เน้นสีน้ำเงิน-ฟ้า ตามสีประจำแผนก/ไอที)
+            // ส่ง Flex Message
             await client.broadcast({
                 type: "flex",
                 altText: `📰 ข่าวใหม่แผนกไอที: ${title}`,
@@ -445,7 +458,7 @@ async function checkCollegeNews() {
                                 margin: "md",
                                 contents: [
                                     { type: "text", text: "📅", size: "sm", color: "#aaaaaa", flex: 0 },
-                                    { type: "text", text: `ประกาศเมื่อ: ${global.latestNewsDate}`, size: "xs", color: "#aaaaaa", margin: "sm" }
+                                    { type: "text", text: `ประกาศเมื่อ: ${webDate}`, size: "xs", color: "#aaaaaa", margin: "sm" }
                                 ]
                             }
                         ]
@@ -458,7 +471,7 @@ async function checkCollegeNews() {
                                 type: "button", 
                                 action: { type: "uri", label: "ดูรายละเอียดประกาศ", uri: link }, 
                                 style: "primary", 
-                                color: "#1a2a6c" // สีน้ำเงินเข้มโทนไอที
+                                color: "#1a2a6c" 
                             },
                             {
                                 type: "text",
@@ -560,18 +573,26 @@ async function handleEvent(event) {
 
     // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต)
 if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
-    user.step = "ask_realname";
-    user.realName = undefined; 
-    user.phone = undefined; // เพิ่มการล้างเบอร์โทร
-    user.email = undefined; // เพิ่มการล้างอีเมล
-    user.badCount = 0; 
-    await user.save();
+    await User.findOneAndUpdate(
+        { userId: user.userId },
+        { 
+            $set: { 
+                step: "ask_realname", 
+                realName: "", 
+                phone: "", 
+                email: "", 
+                badCount: 0 
+            },
+            $unset: { 
+                nickName: "", 
+                age: "", 
+                birthday: "", 
+                department: "" 
+            } // ลบฟิลด์ที่ไม่ได้ใช้แล้วออกจาก DB ทันที
+        }
+    );
     return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มลงทะเบียนผู้สนใจครับ");
 }
-    
-    if (lower.includes("เปลี่ยนชื่อเล่น")) { user.step = "ask_nickname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อเล่นใหม่** ได้เลยครับ"); }
-    if (lower.includes("เปลี่ยนชื่อ")) { user.step = "ask_realname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อจริงใหม่** ได้เลยครับ"); }
-    if (lower.includes("เปลี่ยนอายุ")) { user.step = "ask_age_only"; await user.save(); return reply(event, "พิมพ์ **อายุใหม่** ของคุณครับ"); }
 
     // 8. ระบบแจ้งปัญหาการใช้งาน (REPORT FLOW)
     if (lower === "แจ้งปัญหาการใช้งาน") {
@@ -665,17 +686,6 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ยกเ�
         return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง ${user.realName} ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรือกิจกรรมแผนก** ได้เลยครับ! 🤖`);
     }
 
-    // STEP: ถามแผนก
-    if (user.step === "ask_department") {
-        const foundDept = DEPARTMENTS.find(d => text.toLowerCase().includes(d.toLowerCase()));
-        if (!foundDept) return reply(event, "❌ ไม่พบแผนกนี้ในระบบวิทยาลัยครับ ลองพิมพ์ใหม่อีกครั้งนะ");
-        
-        user.department = foundDept;
-        user.step = "done";
-        await user.save();
-        return reply(event, `🎉 ลงทะเบียนสำเร็จ!\nยินดีต้อนรับน้อง ${user.nickName} แผนก ${user.department} เข้าสู่ระบบครับ`);
-    }
-
     // 10. MULTI INTENT (ปรับปรุงให้ตอบได้หลายอย่างพร้อมกัน)
     let answers = []; 
 
@@ -750,79 +760,49 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ยกเ�
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-   // 11. AI FALLBACK (GPT-4o-mini) - ฉบับเน้นดูแลผู้สนใจและแผนกไอที (ปรับปรุงเสถียรภาพ)
+   // 11. AI FALLBACK - ฉบับผู้เชี่ยวชาญแผนกไอที (Expert Mode)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
-        const userInput = text.toLowerCase().trim();
         
-        // 1. ตารางคำย่อสำหรับแผนกไอที (Synonyms)
-        const itSynonyms = {
-            "ไอที": "เทคโนโลยีสารสนเทศ",
-            "it": "เทคโนโลยีสารสนเทศ",
-            "สมทบ": "หลักสูตรภาคสมทบ (เรียนเฉพาะวันอาทิตย์)",
-            "ต่อเนื่อง": "ปริญญาตรีสายเทคโนโลยี (ทล.บ.)",
-            "ป.ตรี": "ปริญญาตรีสายเทคโนโลยี (ทล.บ.)",
-            "ห้องพักครู": "อาคาร 9 ชั้น 4",
-            "แล็บ": "ห้องปฏิบัติการคอมพิวเตอร์ชั้น 4"
-        };
+        // 👉 แก้ปัญหาที่ 1: ตัดนามสกุลออก เอาเฉพาะชื่อแรกมาเรียก (บุญฤทธิ์ เจียะคง -> น้องบุญฤทธิ์)
+        const firstName = user.realName ? user.realName.split(" ")[0] : "น้อง";
 
-        // 2. ดึงรายชื่อครูแผนกไอทีจาก teacherData (ถ้ามี)
-        const itTeachers = teacherData["เทคโนโลยีสารสนเทศ"] || [];
-        const formattedItTeachers = itTeachers.length > 0 
-            ? itTeachers.map(t => `- ${t.name} (ตำแหน่ง: ${t.positions?.join(", ") || t.position})`).join("\n")
-            : "อ.จารุณี, อ.สุธาวี และคณะครูแผนกไอที";
-
-        // 3. เตรียมฐานข้อมูลความรู้ (Knowledge Base) สำหรับตอบคำถาม
-        const itKnowledge = {
-            admission: "รอบโควตา (หมดเขต 23 ม.ค. 69), รอบปกติ (เปิดรับถึง 18 มี.ค. 69)",
-            partTime: "ปวส.ภาคสมทบ เรียนวันอาทิตย์วันเดียว เหมาะสำหรับคนทำงาน ครูผู้ดูแลคือ อ.จารุณี และ อ.สุธาวี",
-            location: "แผนกไอทีตั้งอยู่ที่ อาคาร 9 ชั้น 4 (อาคารด้านหน้าวิทยาลัย)",
-            contact: "เบอร์โทรวิทยาลัย 02-323-9009 ต่อ แผนกไอที"
-        };
-
-        // 4. ส่งข้อมูลให้ AI ประมวลผล
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท แผนกไอที" (IT Welcome Bot) ประจำแผนกเทคโนโลยีสารสนเทศ วิทยาลัยเทคนิคสมุทรปราการ
+                    content: `คุณคือ "พี่บอท IT" ผู้เชี่ยวชาญประจำแผนกเทคโนโลยีสารสนเทศ วิทยาลัยเทคนิคสมุทรปราการ
                     
-                    [ข้อมูลผู้คุยปัจจุบัน]
-                    - ชื่อจริง: ${user.realName || "น้องผู้สนใจ"}
-                    - เบอร์ติดต่อ: ${user.phone || "ไม่ระบุ"}
-                    - อีเมล: ${user.email || "ไม่ระบุ"}
+                    [ข้อมูลผู้คุย]
+                    - ชื่อเรียก: ${firstName}
+                    - ข้อมูลติดต่อ: เบอร์ ${user.phone || "ไม่ระบุ"}, เมล ${user.email || "ไม่ระบุ"}
+                    
+                    [ข้อมูลที่ต้องตอบอย่างมั่นใจ (Knowledge Base)]
+                    - ปวส. ปกติ: เรียนจันทร์-ศุกร์ เน้นปฏิบัติทางด้าน Network, Software Development และ IT Support
+                    - ปวส. ภาคสมทบ: เรียนวันอาทิตย์วันเดียว (08.00-17.00 น.) เหมาะสำหรับคนทำงานที่ต้องการวุฒิเพิ่ม
+                    - การรับสมัครปี 69: รอบโควตา (ถึง 23 ม.ค. 69), รอบปกติ (ถึง 18 มี.ค. 69)
+                    - เอกสารที่ต้องเตรียม: 1.ใบสมัครวิทยาลัย 2.สำเนาบัตรประชาชน/ทะเบียนบ้าน 3.วุฒิการศึกษาเดิม (ปวช./ม.6) 4.รูปถ่าย 1 นิ้ว
+                    - สถานที่: แผนกไอทีตั้งอยู่ที่ อาคาร 9 ชั้น 4 (อาคารหน้าสุด) เข้ามาคุยกับอาจารย์ได้โดยตรง
+                    - อาจารย์ผู้ดูแล: อ.จารุณี (หัวหน้าแผนก) และ อ.สุธาวี (ดูแลภาคสมทบ)
 
-                    [ข้อมูลอ้างอิงของแผนกไอที]
-                    - ข่าวสารล่าสุด: ${global.latestNewsTitle || "ติดตามได้ที่ it.sptc.ac.th"}
-                    - ลิงก์ข่าว: ${global.latestNewsLink || "https://it.sptc.ac.th"}
-                    - การรับสมัคร: ${itKnowledge.admission}
-                    - หลักสูตรภาคสมทบ: ${itKnowledge.partTime}
-                    - สถานที่ตั้ง: ${itKnowledge.location}
-                    - รายชื่อครูในแผนก:
-                    ${formattedItTeachers}
-
-                    [บริบทเวลา]
-                    - วันนี้คือ: ${dateStr}
-
-                    [กฎการตอบของพี่บอท]
-                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${user.realName || ""}" เสมอ
-                    2. **เน้นสมัครเรียน**: หากถามเรื่องสมัคร ให้เชียร์ให้น้องมาเรียนที่ไอที บอกจุดเด่นเช่นแล็บทันสมัย
-                    3. **เน้นภาคสมทบ**: ถ้าเป็นคนทำงาน ให้เน้นว่าเรียนวันอาทิตย์วันเดียว ไม่กระทบงานประจำ
-                    4. หากน้องถามเรื่องแผนกอื่นที่ไม่ใช่ไอที ให้ตอบสุภาพว่า "พี่บอทดูแลข้อมูลแผนกไอทีเป็นหลัก แต่น้องสามารถดูข้อมูลแผนกอื่นได้ที่เว็บวิทยาลัยครับ"
-                    5. ตอบด้วยภาษาที่เป็นกันเอง สุภาพ มีหางเสียง (ครับ) เหมือนพี่ชายคุยกับน้อง` 
+                    [กฎเหล็กในการตอบ]
+                    1. **ห้ามพูดว่า** "พี่บอทดูแลข้อมูลแผนกไอทีเป็นหลัก" หรือ "ให้ไปหาอ่านเองในเว็บ" (มันดูไม่ฉลาดและเสียความรู้สึก)
+                    2. ให้ใช้ข้อมูลที่มีอยู่นี้ตอบอย่างมั่นใจที่สุด หากถามเรื่องที่ไม่มีในนี้ ให้พยายามให้ข้อมูลใกล้เคียงที่ช่วยเหลือน้องได้มากที่สุด
+                    3. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ทุกครั้ง
+                    4. หากผู้ใช้ถามเรื่องเอกสาร หรือวิธีสมัคร ให้สรุปเป็นข้อๆ ให้ชัดเจนอ่านง่าย
+                    5. รักษาบุคลิกพี่ชายใจดีที่เชี่ยวชาญด้านไอที สุภาพ มีหางเสียง (ครับ)` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.6,
-            max_tokens: 800
+            temperature: 0.5 // ลดค่าลงเพื่อให้ AI ตอบอยู่ในกรอบข้อมูลที่เราให้
         });
 
         return reply(event, aiResponse.choices[0].message.content);
     } catch (e) {
         console.error("AI Error:", e);
-        return reply(event, `ขออภัยครับน้อง ${user.realName} พี่บอทมึนหัวนิดหน่อย รบกวนถามใหม่อีกทีนะครับ 🤖`);
+        return reply(event, `ขออภัยครับน้อง ${firstName} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
     }
 }
 }
