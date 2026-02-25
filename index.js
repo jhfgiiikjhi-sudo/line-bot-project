@@ -39,20 +39,18 @@ mongoose.connect(MONGO_URI)
 const userSchema = new mongoose.Schema({
   userId: { type: String, unique: true, required: true },
   realName: String,
-  nickName: String,
-  age: Number,
-  department: String,
-  birthday: String,
+  phone: String,      // เพิ่ม: เก็บเบอร์โทรศัพท์ (สำคัญมาก)
+  email: String,      // เพิ่ม: เก็บอีเมล
   step: { type: String, default: "ask_realname" },
   badCount: { type: Number, default: 0 },
   blockedUntil: Date,
   tempReport: {
     title: String,
     detail: String,
-    imageUrl: String, // เพิ่ม: เพื่อรองรับการเก็บรูปแจ้งปัญหา
-    step: String      // เพิ่ม: เพื่อจำว่าแจ้งปัญหาถึงขั้นตอนไหน
+    imageUrl: String,
+    step: String 
   }
-});
+}, { timestamps: true }); // แนะนำให้เพิ่ม timestamps เพื่อให้อาจารย์ดูได้ว่าเด็กคนนี้ทักมาเมื่อไหร่
 
 const User = mongoose.model("User", userSchema);
 
@@ -369,58 +367,63 @@ async function downloadContent(messageId) {
 }
 
 // ========================================
-// NEWS SYNC (ระบบแจ้งข่าวสารวิทยาลัยอัตโนมัติ - REINFORCED)
+// IT DEPT NEWS SYNC (ระบบแจ้งข่าวสารแผนกไอทีอัตโนมัติ)
 // ========================================
 
-// ตัวแปรสำหรับ AI อ้างอิง (Initialize ไว้ก่อนกันพัง)
-global.latestNewsTitle = "กำลังติดตามข่าวสาร...";
-global.latestNewsLink = "https://www.sptc.ac.th";
+// ตัวแปรสำหรับ AI อ้างอิง (ข้อมูลตั้งต้นให้เป็นของแผนกไอที)
+global.latestNewsTitle = "กำลังติดตามข่าวสารแผนกไอที...";
+global.latestNewsLink = "https://it.sptc.ac.th";
 global.latestNewsDate = "";
 
 async function checkCollegeNews() {
     try {
-        console.log("📡 เริ่มตรวจสอบข่าววิทยาลัย...");
-        const response = await axios.get("https://www.sptc.ac.th/home/", {
+        console.log("📡 เริ่มตรวจสอบข่าวสารจากแผนกไอที...");
+        // 1. เปลี่ยน URL เป็นเว็บแผนกไอที
+        const response = await axios.get("https://it.sptc.ac.th/home/", {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' },
             timeout: 15000 
         });
 
         const $ = cheerio.load(response.data);
-        const firstPost = $('article').first(); 
-        const title = firstPost.find('h2, h3').first().text().trim() || "ข่าวประชาสัมพันธ์วิทยาลัย";
+        
+        // 2. ปรับ Selector ให้เข้ากับโครงสร้างเว็บแผนก (WordPress)
+        // โดยปกติข่าวจะอยู่ใน article หรือ entry-title
+        const firstPost = $('article, .post, .et_pb_post').first(); 
+        const title = firstPost.find('.entry-title, h2, h1').first().text().trim() || "ข่าวประชาสัมพันธ์แผนกไอที";
         const link = firstPost.find('a').attr('href');
         let rawImg = firstPost.find('img').attr('data-src') || firstPost.find('img').attr('src');
 
         if (!link) return;
 
-        // แก้ปัญหา Image URL ไม่สมบูรณ์ (กฎทอง: รูปต้องขึ้น)
+        // แก้ปัญหา Image URL ของแผนก
         let imageUrl = rawImg;
         if (imageUrl && imageUrl.startsWith('/')) {
-            imageUrl = `https://www.sptc.ac.th${imageUrl}`;
+            imageUrl = `https://it.sptc.ac.th${imageUrl}`;
         }
-        const finalImg = (imageUrl && imageUrl.startsWith('http')) ? imageUrl : "https://www.sptc.ac.th/home/wp-content/uploads/2021/03/logo-sptc.png";
+        // ถ้ารูปไม่มี ให้ใช้รูปปกของแผนกไอทีแทน
+        const finalImg = (imageUrl && imageUrl.startsWith('http')) ? imageUrl : "https://it.sptc.ac.th/home/wp-content/uploads/2023/logo-it.png";
 
-        let savedStatus = await SystemStatus.findOne({ key: "last_news_id" });
+        let savedStatus = await SystemStatus.findOne({ key: "last_it_news_id" });
 
-        // อัปเดตข้อมูลให้ AI เสมอ
+        // อัปเดตข้อมูลให้ AI เสมอ (AI จะรู้ข่าวล่าสุดของแผนกทันที)
         global.latestNewsTitle = title;
         global.latestNewsLink = link;
         global.latestNewsDate = moment().tz("Asia/Bangkok").format("D MMMM YYYY");
 
         // ตรวจสอบว่าเป็นข่าวใหม่จริงไหม
         if (!savedStatus || savedStatus.value !== link) {
-            console.log(`🆕 พบข่าวใหม่: ${title}`);
+            console.log(`🆕 พบข่าวใหม่ของแผนกไอที: ${title}`);
             
             await SystemStatus.findOneAndUpdate(
-                { key: "last_news_id" },
+                { key: "last_it_news_id" },
                 { value: link },
                 { upsert: true }
             );
 
-            // ส่ง Broadcast หา User ทุกคนที่ติดตามบอท
+            // ส่ง Flex Message แจ้งเตือนข่าวใหม่ (เน้นสีน้ำเงิน-ฟ้า ตามสีประจำแผนก/ไอที)
             await client.broadcast({
                 type: "flex",
-                altText: `📢 ข่าวใหม่จากวิทยาลัย: ${title}`,
+                altText: `📰 ข่าวใหม่แผนกไอที: ${title}`,
                 contents: {
                     type: "bubble",
                     hero: { 
@@ -434,9 +437,17 @@ async function checkCollegeNews() {
                         type: "box", 
                         layout: "vertical",
                         contents: [
-                            { type: "text", text: "📢 ข่าวประชาสัมพันธ์ใหม่", weight: "bold", color: "#e67e22", size: "sm" },
+                            { type: "text", text: "🔵 IT DEPT NEWS", weight: "bold", color: "#007bff", size: "sm" },
                             { type: "text", text: title, weight: "bold", size: "md", wrap: true, margin: "md" },
-                            { type: "text", text: `อัปเดตเมื่อ: ${global.latestNewsDate}`, size: "xs", color: "#aaaaaa", margin: "sm" }
+                            { 
+                                type: "box",
+                                layout: "baseline",
+                                margin: "md",
+                                contents: [
+                                    { type: "text", text: "📅", size: "sm", color: "#aaaaaa", flex: 0 },
+                                    { type: "text", text: `ประกาศเมื่อ: ${global.latestNewsDate}`, size: "xs", color: "#aaaaaa", margin: "sm" }
+                                ]
+                            }
                         ]
                     },
                     footer: {
@@ -445,17 +456,25 @@ async function checkCollegeNews() {
                         contents: [
                             { 
                                 type: "button", 
-                                action: { type: "uri", label: "อ่านรายละเอียด", uri: link }, 
+                                action: { type: "uri", label: "ดูรายละเอียดประกาศ", uri: link }, 
                                 style: "primary", 
-                                color: "#2c3e50" 
+                                color: "#1a2a6c" // สีน้ำเงินเข้มโทนไอที
+                            },
+                            {
+                                type: "text",
+                                text: "สอบถามการสมัครเรียนพิมพ์คุยกับพี่บอทได้เลย",
+                                size: "xxs",
+                                color: "#bbbbbb",
+                                align: "center",
+                                margin: "sm"
                             }
                         ]
                     }
                 }
-            }).catch(e => console.error("❌ Broadcast Failed:", e.message));
+            }).catch(e => console.error("❌ IT Broadcast Failed:", e.message));
         }
     } catch (err) {
-        console.error("❌ News Sync Error:", err.message);
+        console.error("❌ IT News Sync Error:", err.message);
     }
 }
 
@@ -540,17 +559,15 @@ async function handleEvent(event) {
     }
 
     // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต)
-    if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
-        user.step = "ask_realname";
-        user.realName = undefined; 
-        user.nickName = undefined;
-        user.age = undefined;
-        user.department = undefined;
-        user.birthday = undefined;
-        user.badCount = 0; 
-        await user.save();
-        return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มใหม่ครับ");
-    }
+if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
+    user.step = "ask_realname";
+    user.realName = undefined; 
+    user.phone = undefined; // เพิ่มการล้างเบอร์โทร
+    user.email = undefined; // เพิ่มการล้างอีเมล
+    user.badCount = 0; 
+    await user.save();
+    return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มลงทะเบียนผู้สนใจครับ");
+}
     
     if (lower.includes("เปลี่ยนชื่อเล่น")) { user.step = "ask_nickname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อเล่นใหม่** ได้เลยครับ"); }
     if (lower.includes("เปลี่ยนชื่อ")) { user.step = "ask_realname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อจริงใหม่** ได้เลยครับ"); }
@@ -582,76 +599,70 @@ async function handleEvent(event) {
         return reply(event, summary);
     }
 
-   // 9. REGISTER FLOW (CORE) - ปรับปรุงให้ Flow ต่อเนื่อง
-    const isRegistered = user.realName && user.nickName && user.age && user.department;
+   // 9. REGISTER FLOW (โหมดรวดเร็วสำหรับนักศึกษาใหม่/Open House)
+    // เปลี่ยนเงื่อนไขการเช็ค: ต้องมี ชื่อจริง, เบอร์โทร, และอีเมล ถึงจะถือว่าลงทะเบียนครบ
+    const isRegistered = user.realName && user.phone && user.email;
 
-    // STEP: ถามชื่อจริง
+    // STEP 1: ถามชื่อจริง
     if (user.step && user.step.startsWith("ask_realname")) {
         if (!isStrictlyHumanName(text)) return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
         
-        // ✨ แก้ไขจุดนี้: รับค่าที่ล้างแล้วจาก updateNameStats มาบันทึกลง user.realName
+        // ล้างชื่อและเก็บสถิติ (คงไว้ตามที่คุณต้องการ)
         user.realName = await updateNameStats('real', text); 
 
-        if (isRegistered || (user.step.endsWith("_only") && user.nickName)) {
-            user.step = "done"; await user.save();
+        // กรณีเปลี่ยนชื่ออย่างเดียว
+        if (user.step.endsWith("_only")) {
+            user.step = "done"; 
+            await user.save();
             return reply(event, `✅ เปลี่ยนชื่อจริงเป็น: ${user.realName} เรียบร้อยครับ`);
         }
         
-        user.step = "ask_nickname";
+        user.step = "ask_phone";
         await user.save();
         const prefix = lower.includes("เปลี่ยนชื่อ") ? `✅ อัปเดตชื่อจริงเรียบร้อยครับคุณ ${user.realName}\n` : `ยินดีที่ได้รู้จักครับคุณ ${user.realName} 😊\n`;
-        return reply(event, `${prefix}ขอทราบ **ชื่อเล่น** ด้วยครับ`);
+        return reply(event, `${prefix}เพื่อความสะดวกในการให้ข้อมูล ขอทราบ **เบอร์โทรศัพท์** ที่ติดต่อได้หน่อยครับ`);
     }
 
-    // STEP: ถามชื่อเล่น
-    if (user.step && user.step.startsWith("ask_nickname")) {
-        if (!isHumanName(text, 1, 15)) return reply(event, "❌ ชื่อเล่นไม่ถูกต้องครับ");
-        user.nickName = text;
-        updateNameStats('nick', text);
-
-        if (isRegistered || (user.step.endsWith("_only") && user.age)) {
-            user.step = "done"; await user.save();
-            return reply(event, `✅ เปลี่ยนชื่อเล่นเป็น: ${text} เรียบร้อยครับ`);
+    // STEP 2: ถามเบอร์โทรศัพท์ (แทนที่การถามชื่อเล่น/อายุ)
+    if (user.step && user.step.startsWith("ask_phone")) {
+        // ตรวจสอบเบอร์โทร 9-10 หลัก
+        const phoneRegex = /^[0-9]{9,10}$/;
+        const cleanPhone = text.replace(/-/g, "").trim(); 
+        
+        if (!phoneRegex.test(cleanPhone)) {
+            return reply(event, "❌ กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (เป็นตัวเลข 9-10 หลัก) ครับ");
         }
+        
+        user.phone = cleanPhone;
 
-        user.step = "ask_age";
-        await user.save();
-        return reply(event, `บันทึกชื่อเล่นเรียบร้อยครับคุณ ${text} ต่อไปขอทราบ **อายุ** (เป็นตัวเลข) ครับ`);
-    }
-
-    // STEP: ถามอายุ
-    if (user.step && user.step.startsWith("ask_age")) {
-        const age = parseInt(text);
-        if (isNaN(age) || age < 1 || age > 80) return reply(event, "❌ กรุณากรอกอายุเป็นตัวเลข (1-80) ครับ");
-        user.age = age;
-
-        if (isRegistered || user.step.endsWith("_only")) {
-            user.step = "done"; await user.save();
-            return reply(event, `✅ อัปเดตอายุเป็น: ${age} ปี เรียบร้อยครับ`);
-        }
-
-        user.step = "ask_birthday";
-        await user.save();
-        return reply(event, "วันเกิดน้องวันไหนครับ? (เช่น 12/08/2545)\nหรือพิมพ์ **'ข้าม'** ก็ได้ครับ");
-    }
-
-    // STEP: ถามวันเกิด (รองรับการพิมพ์ผิด 'ช้าม')
-    if (user.step === "ask_birthday") {
-        const input = text.trim();
-        if (input.includes("ข้าม") || input.includes("ช้าม") || input.toLowerCase() === "skip") {
-            user.step = "ask_department";
+        // กรณีเปลี่ยนเบอร์อย่างเดียว
+        if (user.step.endsWith("_only")) {
+            user.step = "done"; 
             await user.save();
-            return reply(event, "โอเคครับ ข้ามวันเกิดไปนะ... สุดท้ายแล้ว น้องอยู่ **แผนกวิชา** อะไรครับ?");
+            return reply(event, `✅ อัปเดตเบอร์โทรเป็น: ${user.phone} เรียบร้อยครับ`);
         }
 
-        if (!moment(input, "DD/MM/YYYY", true).isValid()) {
-            return reply(event, "❌ รูปแบบผิดครับ (วัน/เดือน/ปี พ.ศ. เช่น 15/01/2548)\nถ้าไม่สะดวกระบุ ให้พิมพ์คำว่า **'ข้าม'** ได้เลยครับ");
-        }
-
-        user.birthday = input;
-        user.step = "ask_department";
+        user.step = "ask_email";
         await user.save();
-        return reply(event, "บันทึกวันเกิดแล้วครับ สุดท้ายแล้ว... น้องอยู่ **แผนกวิชา** อะไรครับ?\n(เช่น ช่างยนต์, ไอที, การบัญชี)");
+        return reply(event, `บันทึกเบอร์โทรศัพท์เรียบร้อยครับ ต่อไปขอทราบ **อีเมล** เพื่อใช้ส่งระเบียบการครับ\n(หากไม่มีให้พิมพ์ว่า **'ไม่มี'** ครับ)`);
+    }
+
+    // STEP 3: ถามอีเมล (แทนที่การถามแผนก/วันเกิด)
+    if (user.step && user.step.startsWith("ask_email")) {
+        if (text === "ไม่มี") {
+            user.email = "ไม่ได้ระบุ";
+        } else {
+            // ตรวจสอบรูปแบบ Email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(text)) {
+                return reply(event, "❌ รูปแบบอีเมลไม่ถูกต้องครับ (เช่น example@mail.com)\nหากไม่สะดวกระบุ ให้พิมพ์ว่า **'ไม่มี'** ได้เลยครับ");
+            }
+            user.email = text;
+        }
+
+        user.step = "done";
+        await user.save();
+        return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง ${user.realName} ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรือกิจกรรมแผนก** ได้เลยครับ! 🤖`);
     }
 
     // STEP: ถามแผนก
@@ -670,11 +681,10 @@ async function handleEvent(event) {
 
     // เช็คเรื่องเวลา
     if (lower.includes("กี่โมง") || lower.includes("เวลา")) {
-        // ✨ เพิ่มเงื่อนไข: ถ้าถามเรื่องเวลา แต่ไม่มีคำว่า "เรียน" หรือ "รอบ" (ที่เป็นเวลาเรียน) ถึงจะตอบเวลาปัจจุบัน
         if (!lower.includes("เรียน") && !lower.includes("รอบ")) {
-            answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับน้อง ${user.nickName}`);
+            // เปลี่ยนจาก user.nickName เป็น user.realName
+            answers.push(`⏰ ตอนนี้เวลา ${now.format("HH:mm")} น. ครับน้อง ${user.realName || ""}`);
         }
-        // ถ้ามีคำว่า "เรียน" ระบบจะข้ามเงื่อนไขนี้ไป และไปให้ AI ตอบในข้อ 11 แทน
     }
 
     // เช็คเรื่องวันที่
@@ -690,16 +700,6 @@ async function handleEvent(event) {
     // ถ้ามีการเก็บคำตอบไว้ใน Array ให้ส่งคำตอบทั้งหมดออกไปพร้อมกัน
     if (answers.length > 0) {
         return reply(event, answers.join("\n")); // เชื่อมคำตอบด้วยการขึ้นบรรทัดใหม่
-    }
-    if (lower === "/topname") {
-        const topNicks = await NameStat.find({ type: 'nick' }).sort({ count: -1 }).limit(3);
-        
-        if (topNicks.length === 0) {
-            return reply(event, "📊 ยังไม่มีข้อมูลชื่อเล่นในระบบครับ");
-        }
-
-        const resMsg = `📊 ชื่อเล่นยอดนิยมในระบบ:\n${topNicks.map((n, i) => `${i + 1}. ${n.name} (${n.count} คน)`).join('\n')}`;
-        return reply(event, resMsg);
     }
 
    // --- ระบบเช็คข่าวสาร (Smart News) ---
@@ -750,163 +750,79 @@ async function handleEvent(event) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-    // 11. AI FALLBACK (GPT-4o-mini) - ฉบับฉลาดพิเศษ (เข้าใจคำย่อ + ค้นหาจากโปรไฟล์ผู้ใช้)
+   // 11. AI FALLBACK (GPT-4o-mini) - ฉบับเน้นดูแลผู้สนใจและแผนกไอที (ปรับปรุงเสถียรภาพ)
 if (user.step === "done") {
     try {
         const dateStr = now.format("LLLL"); 
         const userInput = text.toLowerCase().trim();
         
-        // 1. ตารางคำย่อ (Synonyms) เพื่อให้บอทเข้าใจภาษาพูดที่เด็กใช้
-        const deptSynonyms = {
-            // กลุ่มบริหาร
-            "ผอ": "ผู้อำนวยการ",
-            "รอง": "รองผู้อำนวยการ",
-            "บริหาร": "บริหารและหัวหน้างาน",
-
-            // กลุ่มช่างอุตสาหกรรม
-            "ยนต์": "ช่างยนต์",
-            "กล": "ช่างกลโรงงานและแม่พิมพ์",
-            "โรงงาน": "ช่างกลโรงงานและแม่พิมพ์",
-            "แม่พิมพ์": "ช่างกลโรงงานและแม่พิมพ์",
-            "เชื่อม": "ช่างเชื่อมและโลหะแผ่น",
-            "โลหะ": "ช่างเชื่อมและโลหะแผ่น",
-            "ไฟฟ้า": "ช่างไฟฟ้ากำลัง",
-            "ไฟกำลัง": "ช่างไฟฟ้ากำลัง",
-            "อิเล็ก": "ช่างอิเล็กทรอนิกส์",
-            "เขียนแบบ": "เขียนแบบเครื่องกล",
-            "เทคนิคพื้นฐาน": "เทคนิคพื้นฐาน",
-            "เทคนิคอุต": "เทคนิคอุตสาหกรรม",
-            "ก่อสร้าง": "ก่อสร้าง",
-
-            // กลุ่มบริหารธุรกิจ/พาณิชยกรรม
-            "บัญชี": "การบัญชี",
-            "ตลาด": "การตลาด",
-            "คอม": "เทคโนโลยีธุรกิจดิจิทัล",
-            "ธุรกิจดิจิทัล": "เทคโนโลยีธุรกิจดิจิทัล",
+        // 1. ตารางคำย่อสำหรับแผนกไอที (Synonyms)
+        const itSynonyms = {
             "ไอที": "เทคโนโลยีสารสนเทศ",
             "it": "เทคโนโลยีสารสนเทศ",
-            "โลจิส": "การจัดการโลจิสติกส์และซัพพลายเชน",
-
-            // กลุ่มคหกรรม/การท่องเที่ยว
-            "แฟชั่น": "แฟชั่นและสิ่งทอ",
-            "ผ้า": "แฟชั่นและสิ่งทอ",
-            "อาหาร": "อาหารและโภชนาการ",
-            "ท่องเที่ยว": "การท่องเที่ยว",
-            "โรงแรม": "การโรงแรม",
-
-            // กลุ่มวิชาสามัญ/อื่นๆ
-            "สามัญ": "สามัญสัมพันธ์",
-            "วิทย์": "สามัญสัมพันธ์",
-            "คณิต": "สามัญสัมพันธ์",
-            "อังกฤษ": "สามัญสัมพันธ์",
-            "พละ": "สามัญสัมพันธ์",
-            "อากาศยาน": "ห้องปฏิบัติการกลางและช่างอากาศยาน",
-            "แล็บ": "ห้องปฏิบัติการกลางและช่างอากาศยาน"
+            "สมทบ": "หลักสูตรภาคสมทบ (เรียนเฉพาะวันอาทิตย์)",
+            "ต่อเนื่อง": "ปริญญาตรีสายเทคโนโลยี (ทล.บ.)",
+            "ป.ตรี": "ปริญญาตรีสายเทคโนโลยี (ทล.บ.)",
+            "ห้องพักครู": "อาคาร 9 ชั้น 4",
+            "แล็บ": "ห้องปฏิบัติการคอมพิวเตอร์ชั้น 4"
         };
 
-        // 2. สร้างสรุปจำนวนครูแต่ละแผนก
-        let deptStats = {};
-        for (const cat in teacherData) {
-            deptStats[cat] = teacherData[cat].length;
-        }
+        // 2. ดึงรายชื่อครูแผนกไอทีจาก teacherData (ถ้ามี)
+        const itTeachers = teacherData["เทคโนโลยีสารสนเทศ"] || [];
+        const formattedItTeachers = itTeachers.length > 0 
+            ? itTeachers.map(t => `- ${t.name} (ตำแหน่ง: ${t.positions?.join(", ") || t.position})`).join("\n")
+            : "อ.จารุณี, อ.สุธาวี และคณะครูแผนกไอที";
 
-        // 3. เตรียม Keyword ค้นหา
-        let searchKeyword = userInput.replace(/(แผนกวิชา|วิชา|งาน|ขอรายชื่อครู|ขอรายชื่อ|ของ|มีกี่คน|กี่คน|ใครคือ|ใครเป็น|ใครคือหัวหน้า)/g, "").trim();
-        
-        // --- ระบบอัจฉริยะ: ถ้าถามถึง "แผนกผม" ให้ดึงชื่อแผนกจากโปรไฟล์น้องมาค้นหาทันที ---
-        if (userInput.includes("แผนกผม") || userInput.includes("แผนกที่ผมเรียน") || userInput.includes("แผนกของผม")) {
-            const userDept = user.department || "";
-            searchKeyword = userDept.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-        }
+        // 3. เตรียมฐานข้อมูลความรู้ (Knowledge Base) สำหรับตอบคำถาม
+        const itKnowledge = {
+            admission: "รอบโควตา (หมดเขต 23 ม.ค. 69), รอบปกติ (เปิดรับถึง 18 มี.ค. 69)",
+            partTime: "ปวส.ภาคสมทบ เรียนวันอาทิตย์วันเดียว เหมาะสำหรับคนทำงาน ครูผู้ดูแลคือ อ.จารุณี และ อ.สุธาวี",
+            location: "แผนกไอทีตั้งอยู่ที่ อาคาร 9 ชั้น 4 (อาคารด้านหน้าวิทยาลัย)",
+            contact: "เบอร์โทรวิทยาลัย 02-323-9009 ต่อ แผนกไอที"
+        };
 
-        // แปลงคำย่อจากตาราง Synonym (ถ้ามี)
-        for (const [short, full] of Object.entries(deptSynonyms)) {
-            if (searchKeyword.includes(short)) {
-                searchKeyword = full.toLowerCase().replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-                break;
-            }
-        }
-
-        let foundData = [];
-        for (const category in teacherData) {
-            const categoryLower = category.toLowerCase();
-            const categoryCore = categoryLower.replace(/(แผนกวิชา|ช่าง|การ)/g, "").trim();
-
-            // Match แผนก (เช็คทั้งแบบคำย่อและคำเต็ม)
-            const isCategoryMatch = (searchKeyword.length >= 2 && (categoryLower.includes(searchKeyword) || searchKeyword.includes(categoryCore)));
-
-            teacherData[category].forEach(t => {
-                const cleanName = t.name.replace(/^(นาย|นางสาว|นาง|น\.ส\.|ว่าที่|ร\.ต\.|จ่าสิบเอก)/g, "").trim().toLowerCase();
-                const isNameMatch = userInput.includes(cleanName) && cleanName.length > 2;
-
-                const isPosMatch = t.positions?.some(p => {
-                    const pLower = p.toLowerCase();
-                    return (searchKeyword.length >= 2 && (pLower.includes(searchKeyword) || searchKeyword.includes(pLower.replace("แผนกวิชา", "").trim())));
-                }) || (t.position && t.position.toLowerCase().includes(searchKeyword));
-
-                if (isNameMatch || isPosMatch || isCategoryMatch) {
-                    const posDisplay = t.positions ? t.positions.join(", ") : t.position;
-                    foundData.push(`- ${t.name} (แผนก: ${category}) | ตำแหน่ง: ${posDisplay}`);
-                }
-            });
-        }
-
-        const uniqueResults = [...new Set(foundData)];
-        const matchCount = uniqueResults.length;
-        const relevantTeachers = matchCount > 0 ? uniqueResults.join("\n") : "ไม่พบรายชื่อที่ระบุในฐานข้อมูล teacherData";
-        // ---------------------------------------------------------
-
+        // 4. ส่งข้อมูลให้ AI ประมวลผล
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท SPTC" ที่ปรึกษาผู้ใจดีจากวิทยาลัยเทคนิคสมุทรปราการ (SPTC)
+                    content: `คุณคือ "พี่บอท แผนกไอที" (IT Welcome Bot) ประจำแผนกเทคโนโลยีสารสนเทศ วิทยาลัยเทคนิคสมุทรปราการ
                     
-                    [ข้อมูลผู้ใช้]
-                    - ชื่อจริง: ${user.realName || "ไม่ระบุ"}
-                    - ชื่อเล่น: ${user.nickName || "น้อง"}
-                    - อายุ: ${user.age || "ไม่ระบุ"} ปี
-                    - แผนก: ${user.department || "ไม่ระบุ"}
-                    - วันเกิด: ${user.birthday || "ไม่ได้ลงทะเบียนไว้"}
+                    [ข้อมูลผู้คุยปัจจุบัน]
+                    - ชื่อจริง: ${user.realName || "น้องผู้สนใจ"}
+                    - เบอร์ติดต่อ: ${user.phone || "ไม่ระบุ"}
+                    - อีเมล: ${user.email || "ไม่ระบุ"}
 
-                    [ข้อมูลอ้างอิงวิทยาลัย]
-                    - พื้นที่: ${collegeData.physicalInfo?.area || "76 ไร่"}
-                    - อาคารเรียน: ${collegeData.physicalInfo?.buildings || "26 หลัง"}
-                    - เวลาเรียน: ${JSON.stringify(collegeData.academicTime)}
-                    - ระบบออนไลน์: ${JSON.stringify(collegeData.onlineSystems)}
-                    
-                    [สถิติจำนวนบุคลากรแต่ละแผนก]
-                    ${JSON.stringify(deptStats)}
+                    [ข้อมูลอ้างอิงของแผนกไอที]
+                    - ข่าวสารล่าสุด: ${global.latestNewsTitle || "ติดตามได้ที่ it.sptc.ac.th"}
+                    - ลิงก์ข่าว: ${global.latestNewsLink || "https://it.sptc.ac.th"}
+                    - การรับสมัคร: ${itKnowledge.admission}
+                    - หลักสูตรภาคสมทบ: ${itKnowledge.partTime}
+                    - สถานที่ตั้ง: ${itKnowledge.location}
+                    - รายชื่อครูในแผนก:
+                    ${formattedItTeachers}
 
-                    [ข้อมูลบุคลากรที่ค้นพบ]
-                    ${relevantTeachers}
+                    [บริบทเวลา]
+                    - วันนี้คือ: ${dateStr}
 
-                    [บริบทปัจจุบัน]
-                    - วันนี้: ${dateStr}
-                    - ข่าวสารล่าสุด: ${global.latestNewsTitle || "ไม่มีประกาศใหม่ในขณะนี้"}
-                    - ข้อมูลพื้นฐานวิทยาลัย: ${JSON.stringify(collegeData)}
-                    - ข้อมูลราชการ/จังหวัด: ${JSON.stringify(officialFacts)} 
-
-                    [กฎการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง (ตามด้วยชื่อเล่น)"
-                    2. หากถามถึงครู/อาจารย์:
-                       - ให้สรุปรายชื่อที่พบจาก [ข้อมูลบุคลากรที่ค้นพบ] 
-                       - หากเจอหลายแผนก ให้แยกเป็นหัวข้อแผนกให้ชัดเจน
-                    3. หากไม่พบรายชื่อ: ให้ตอบอย่างสุภาพว่า "พี่บอทค้นหาในระบบไม่เจอครับ" และแนะนำให้เช็คตัวสะกด หรือบอกชื่อแผนกแทน
-                    4. ห้าม "มโน" หรือสร้างชื่อครู/ตำแหน่งขึ้นมาเองเด็ดขาด ถ้าไม่มีในฐานข้อมูลให้บอกว่าไม่มี
+                    [กฎการตอบของพี่บอท]
+                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${user.realName || ""}" เสมอ
+                    2. **เน้นสมัครเรียน**: หากถามเรื่องสมัคร ให้เชียร์ให้น้องมาเรียนที่ไอที บอกจุดเด่นเช่นแล็บทันสมัย
+                    3. **เน้นภาคสมทบ**: ถ้าเป็นคนทำงาน ให้เน้นว่าเรียนวันอาทิตย์วันเดียว ไม่กระทบงานประจำ
+                    4. หากน้องถามเรื่องแผนกอื่นที่ไม่ใช่ไอที ให้ตอบสุภาพว่า "พี่บอทดูแลข้อมูลแผนกไอทีเป็นหลัก แต่น้องสามารถดูข้อมูลแผนกอื่นได้ที่เว็บวิทยาลัยครับ"
                     5. ตอบด้วยภาษาที่เป็นกันเอง สุภาพ มีหางเสียง (ครับ) เหมือนพี่ชายคุยกับน้อง` 
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.6, // เพิ่มความยืดหยุ่นในการตอบให้น่ารักขึ้น
-            max_tokens: 700
+            temperature: 0.6,
+            max_tokens: 800
         });
 
         return reply(event, aiResponse.choices[0].message.content);
     } catch (e) {
         console.error("AI Error:", e);
-        return reply(event, `ขออภัยครับน้อง ${user.nickName} พี่บอทมึนหัวนิดหน่อย รบกวนถามใหม่อีกครั้งนะ 🤖`);
+        return reply(event, `ขออภัยครับน้อง ${user.realName} พี่บอทมึนหัวนิดหน่อย รบกวนถามใหม่อีกทีนะครับ 🤖`);
     }
 }
 }
@@ -936,7 +852,7 @@ async function handleImageMessage(event, user) {
             const successMsg = `✅ ได้รับรูปภาพประกอบแล้ว!\n\n` +
                                `📌 หัวข้อ: ${user.tempReport?.title || "ไม่ระบุ"}\n` +
                                `📝 รายละเอียด: ${user.tempReport?.detail || "ไม่ระบุ"}\n` +
-                               `👤 ผู้แจ้ง: ${user.realName} (แผนก ${user.department})\n\n` +
+                               `👤 ผู้แจ้ง: ${user.realName}\n\n` +
                                `พี่บอทส่งเรื่องให้เจ้าหน้าที่ตรวจสอบเรียบร้อยแล้วครับ ขอบคุณครับ 🙏`;
             
             // ล้างข้อมูลชั่วคราวและเปลี่ยนสถานะเป็น Done
@@ -964,7 +880,7 @@ async function handleImageMessage(event, user) {
                         content: [
                             { 
                                 type: "text", 
-                                text: `วิเคราะห์รูปภาพนี้อย่างสุภาพในฐานะ 'พี่บอท' ผู้ช่วยวิทยาลัย SPTC ให้กับนักเรียนชื่อ ${user.nickName} แผนก ${user.department} (หากเป็นรูปของกิน, สถานที่ หรือสิ่งของ ให้ทักทายอย่างเป็นกันเอง)` 
+                                text: `วิเคราะห์รูปภาพนี้อย่างสุภาพในฐานะ 'พี่บอท' ผู้ช่วยวิทยาลัย SPTC ให้กับน้อง ${user.realName} (หากเป็นรูปของกิน, สถานที่ หรือสิ่งของ ให้ทักทายอย่างเป็นกันเอง)` 
                             },
                             { 
                                 type: "image_url", 
@@ -1006,7 +922,7 @@ async function handleImageMessage(event, user) {
 async function getLatestNews(limit = 2) {
     try {
         const fetchLimit = limit < 5 ? 5 : limit; 
-        const response = await axios.get("https://www.sptc.ac.th/home/", {
+        const response = await axios.get("https://it.sptc.ac.th", {
             timeout: 15000, // เพิ่มเวลาให้เว็บที่โหลดช้า
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' 
@@ -1016,16 +932,12 @@ async function getLatestNews(limit = 2) {
         const $ = cheerio.load(response.data);
         const news = [];
         
-        // เจาะจงหาลิงก์ที่มี ?p= (ID ข่าว) ภายในส่วนที่เป็นเนื้อหา (elementor-widget-container)
-        $(".elementor-widget-container a[href*='?p=']").each((i, el) => {
+        // ปรับให้รองรับโครงสร้าง WordPress มาตรฐานของแผนก
+        $(".entry-title a, .post-title a, article h2 a").each((i, el) => {
             const title = $(el).text().trim();
             const link = $(el).attr("href");
 
-            // กรองเงื่อนไขที่เข้มงวดขึ้น:
-            // 1. ต้องมีชื่อเรื่องยาวกว่า 15 ตัวอักษร (กันพวกคำว่า 'อ่านต่อ' หรือ 'Menu')
-            // 2. ลิงก์ต้องเป็นลิงก์ถาวรของข่าว (?p=...)
-            // 3. ไม่ซ้ำกับข่าวที่เก็บไปแล้ว
-            if (title && link && title.length > 15 && !title.includes("Menu") && !news.some(n => n.link === link)) {
+            if (title && link && title.length > 10 && !news.some(n => n.link === link)) {
                 if (news.length < fetchLimit) {
                     news.push({ title, link });
                 }
@@ -1067,7 +979,7 @@ async function initGlobalStats() {
         console.log("📦 ระบบกำลังเริ่มทำงาน (Initialization)...");
         
         // 1. ดึงสถานะข่าวล่าสุดจากฐานข้อมูล
-        const savedStatus = await SystemStatus.findOne({ key: "last_news_id" });
+        const savedStatus = await SystemStatus.findOne({ key: "last_it_news_id" });
         
         // 2. รันตรวจสอบข่าวหน้าเว็บทันที เพื่อโหลดข้อมูลเข้า Global Variable ให้ AI ใช้
         await checkCollegeNews(); 
@@ -1103,7 +1015,7 @@ app.listen(PORT, () => {
 
 // 4. ตั้งเวลาตรวจสอบข่าวหน้าเว็บทุก 30 นาที (Cron Job)
 cron.schedule("*/30 * * * *", () => {
-    console.log("⏰ Cron: กำลังตรวจสอบข่าวใหม่จากวิทยาลัย...");
+    console.log("⏰ Cron: กำลังตรวจสอบข่าวใหม่จากแผนก IT ...");
     checkCollegeNews();
 });
 // ========================================
