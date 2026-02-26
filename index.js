@@ -571,22 +571,32 @@ async function handleEvent(event) {
         return reply(event, "⚠️ ระบบตรวจพบข้อความลักษณะสแปม กรุณาพิมพ์ข้อความที่มีความหมายครับ");
     }
 
-      // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต)
-    if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
-        user.step = "ask_realname";
-        user.realName = undefined; 
-        user.nickName = undefined;
-        user.age = undefined;
-        user.department = undefined;
-        user.birthday = undefined;
-        user.badCount = 0; 
-        await user.save();
-        return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มใหม่ครับ");
+      // ========================================
+// 7. คำสั่งพิเศษ (เริ่มใหม่ / รีเซ็ต)
+// ========================================
+if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
+    try {
+        await User.findOneAndUpdate(
+            { userId: user.userId },
+            { 
+                $set: { step: "ask_realname", badCount: 0 },
+                $unset: { 
+                    realName: "", 
+                    phone: "", 
+                    email: ""
+                } 
+            }
+        );
+
+        return reply(event, [
+            { type: "text", text: "🤖 รีเซ็ตระบบสำเร็จ! ลบชื่อ เบอร์โทร และอีเมล ออกจากระบบเรียบร้อยแล้วครับ" },
+            { type: "text", text: "กรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของน้องเพื่อเริ่มลงทะเบียนใหม่ครับ" }
+        ]);
+    } catch (err) {
+        console.error("❌ Reset Error:", err);
+        return reply(event, "เกิดข้อผิดพลาดในการรีเซ็ต ลองพิมพ์ 'เริ่มใหม่' อีกครั้งนะครับ");
     }
-    
-    if (lower.includes("เปลี่ยนชื่อเล่น")) { user.step = "ask_nickname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อเล่นใหม่** ได้เลยครับ"); }
-    if (lower.includes("เปลี่ยนชื่อ")) { user.step = "ask_realname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อจริงใหม่** ได้เลยครับ"); }
-    if (lower.includes("เปลี่ยนอายุ")) { user.step = "ask_age_only"; await user.save(); return reply(event, "พิมพ์ **อายุใหม่** ของคุณครับ"); }
+}
 
     // 8. ระบบแจ้งปัญหาการใช้งาน (REPORT FLOW)
     if (lower === "แจ้งปัญหาการใช้งาน") {
