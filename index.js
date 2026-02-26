@@ -809,22 +809,31 @@ if (lower.includes("ข่าว")) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-   // 11. AI FALLBACK - ฉบับรวมฐานข้อมูลวิทยาลัยและแผนกไอที (ไฟล์ล่าสุด)
+   // ========================================
+// 11. AI FALLBACK - ฉบับสมบูรณ์ (ดึงข้อมูลไฟล์จริง + QR เฉพาะออนไลน์)
+// ========================================
 if (user.step === "done") {
     try {
         const firstName = user.realName ? user.realName.split(" ")[0] : "น้อง";
 
-        // 👉 เตรียมข้อมูลจากไฟล์ teacherData.js (เจาะจงแผนกไอที)
+        // 1. 👉 เตรียมข้อมูลจากไฟล์ teacherData.js (เน้นแผนกไอที)
         const itTeachers = teacherData["แผนกวิชาเทคโนโลยีสารสนเทศ"] || teacherData["ดิจิทัลและสารสนเทศ"] || [];
-        const teacherList = itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : t.position})`).join("\n");
+        const teacherList = itTeachers.length > 0 
+            ? itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : t.position})`).join("\n")
+            : "- อ.จารุณี (หัวหน้าแผนก)\n- อ.สุธาวี (ดูแลภาคสมทบ)";
         
-        // 👉 เตรียมข้อมูลจากไฟล์ collegeData.js
+        // 2. 👉 เตรียมข้อมูลจากไฟล์ collegeData.js (ดึงมาทุกส่วนสำคัญ)
         const collegeAddr = collegeData.contact.Address;
         const collegePhone = collegeData.contact.PhoneNumber;
         const collegeArea = collegeData.physicalInfo.area;
+        const collegeBuildings = collegeData.physicalInfo.buildings;
+        
+        // ข้อมูลเวลาเรียน (ภาคปกติ/สมทบ)
+        const timeMorning = collegeData.academicTime.morning;
+        const timeEvening = collegeData.academicTime.evening;
 
         // ข่าวล่าสุดจาก Global
-        const currentNews = `${global.latestNewsTitle} (${global.latestNewsDate || "วันศุกร์ที่ 20 กุมภาพันธ์ 2569"})`;
+        const currentNews = `${global.latestNewsTitle || "ข่าวประชาสัมพันธ์วิทยาลัย"} (${global.latestNewsDate || "อัปเดตล่าสุด"})`;
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
@@ -835,9 +844,16 @@ if (user.step === "done") {
                     
                     [ข้อมูลวิทยาลัยและสถานที่ตั้ง]
                     - ที่อยู่ปัจจุบัน: ${collegeAddr} (ใช้ที่อยู่นี้เมื่อมีคนถามว่าวิทยาลัยอยู่ที่ไหน)
-                    - สถานที่ตั้งแผนกไอที: อาคาร 7
-                    - พื้นที่วิทยาลัย: มีพื้นที่ทั้งหมด ${collegeArea} มีอาคารเรียน ${collegeData.physicalInfo.buildings}
-                    - เบอร์ติดต่อสอบถาม: ${collegePhone}
+                    - พื้นที่วิทยาลัย: ${collegeArea} มีอาคารเรียนทั้งหมด ${collegeBuildings} หลัง
+                    - สถานที่ตั้งแผนกไอที: อาคาร 9 ชั้น 4 (อาคารหน้าสุด)
+                    - เบอร์ติดต่อ: ${collegePhone}
+
+                    [ข้อมูลเวลาเรียน]
+                    - ภาคปกติ (เช้า/บ่าย): ${timeMorning}
+                    - ภาคสมทบ (ค่ำ/เสาร์-อาทิตย์): ${timeEvening}
+
+                    [รายชื่ออาจารย์ในแผนกไอที]
+                    ${teacherList}
 
                     [การสมัครเรียนออนไลน์]
                     - ลิงก์สมัคร: https://admission.vec.go.th/web/student.htm?mode=register
@@ -845,12 +861,12 @@ if (user.step === "done") {
                     - เอกสาร ปวส.: วุฒิ ปวช./ม.6, สำเนาบัตรประชาชน/ทะเบียนบ้าน, รูปถ่าย 1 นิ้ว
                     - เอกสาร ป.ตรี: วุฒิ ปวส. ไอทีหรือสาขาที่เกี่ยวข้อง, ระเบียนแสดงผลการเรียน (GPA)
 
-                    [กฎการตอบ]
-                    1. เมื่อถามว่า "วิทยาลัยอยู่ที่ไหน" ต้องตอบที่อยู่เต็มจากข้อมูล [ที่อยู่ปัจจุบัน] ห้ามตอบแค่ที่แผนกอย่างเดียว
-                    2. หากถามเรื่อง "อาจารย์" หรือ "ติดต่อใคร" ให้ดึงรายชื่ออาจารย์ข้างต้นมาตอบ และแจ้งเบอร์ ${collegePhone}
-                    3. หากถามเรื่องสมัครเรียน ให้ส่งลิงก์สมัครออนไลน์และสรุปเอกสารให้ครบตามระดับชั้น
-                    4. ห้ามปฏิเสธว่าไม่มีข้อมูล ป.ตรี ให้ใช้ข้อมูลข้างต้นตอบ
-                    5. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" เสมอ`
+                    [กฎเหล็กการตอบ]
+                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ทุกประโยค
+                    2. เมื่อถามว่า "วิทยาลัยอยู่ที่ไหน" ต้องตอบที่อยู่เต็มจากข้อมูล [ที่อยู่ปัจจุบัน]
+                    3. ถามเรื่อง "อาจารย์" ให้ดึงรายชื่ออาจารย์จากด้านบนมาตอบให้ครบ
+                    4. ถามเรื่อง "เวลาเรียน" ให้แจ้งทั้งเวลาภาคปกติและภาคสมทบตามข้อมูลที่มี
+                    5. ข่าวล่าสุด: ${currentNews}`
                 },
                 { role: "user", content: text }
             ],
@@ -859,8 +875,8 @@ if (user.step === "done") {
 
         const aiMsg = aiResponse.choices[0].message.content;
 
-        // 👉 เช็คเงื่อนไขส่ง QR Code (เมื่อถามเรื่องสมัครเรียน หรือ เอกสาร)
-        if (aiMsg.includes("สมัคร") || aiMsg.includes("เอกสาร") || aiMsg.includes("ออนไลน์")) {
+        // 3. ✨ เงื่อนไขส่ง QR Code: ส่งเฉพาะเมื่อถามถึง "สมัครเรียน" + "ออนไลน์" เท่านั้น
+        if (lower.includes("สมัคร") && lower.includes("ออนไลน์")) {
             const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=https://admission.vec.go.th/web/student.htm?mode=register";
             
             return client.replyMessage(event.replyToken, [
@@ -873,10 +889,13 @@ if (user.step === "done") {
             ]);
         }
 
+        // กรณีถามสมัครเรียน หรือ เอกสาร (แบบไม่ออนไลน์) ส่งแค่ข้อความ AI
         return reply(event, aiMsg);
+
     } catch (e) {
         console.error("AI Error:", e);
-        return reply(event, `ขออภัยครับน้อง ${firstName} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
+        const firstNameFallback = user.realName ? user.realName.split(" ")[0] : "น้อง";
+        return reply(event, `ขออภัยครับน้อง ${firstNameFallback} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
     }
 }
 }
