@@ -572,20 +572,20 @@ async function handleEvent(event) {
     }
 
       // ========================================
-// --- 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต) ---
-if (lower.includes("เริ่มใหม่") || lower.includes("ลบข้อมูล") || lower.includes("ลงทะเบียนใหม่")) {
-    await User.findOneAndUpdate(
-        { userId: user.userId },
-        { 
-            $set: { step: "ask_realname", badCount: 0 },
-            $unset: { realName: "", phone: "", email: "" } 
-        }
-    );
-    // ต้องส่ง 2 ข้อความ เพื่อให้ User รู้ว่าต้องพิมพ์ชื่อต่อทันที
-    return reply(event, [
-        { type: "text", text: "กรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของน้องเพื่อเริ่มใหม่ได้เลยครับ" }
-    ]);
-}
+ // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต)
+    if (lower.includes("เริ่มใหม่") || lower.includes("ลบข้อมูล") || lower.includes("ลงทะเบียนใหม่")) {
+        user.step = "ask_realname";
+        user.realName = undefined; 
+        user.phone = undefined;
+        user.email = undefined;
+        user.badCount = 0; 
+        await user.save();
+        return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มใหม่ครับ");
+    }
+    
+    if (lower.includes("เปลี่ยนชื่อจริง")) { user.step = "ask_realname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อจริงใหม่** ได้เลยครับ"); }
+    if (lower.includes("เปลี่ยนเบอร์")) { user.step = "ask_phone_only"; await user.save(); return reply(event, "พิมพ์ **เบอร์โทรศัพท์ใหม่** ได้เลยครับ"); }
+    if (lower.includes("เปลี่ยนอีเมล")) { user.step = "ask_email_only"; await user.save(); return reply(event, "พิมพ์ **อีเมลใหม่** ของน้องครับ"); }
 
     // 8. ระบบแจ้งปัญหาการใช้งาน (REPORT FLOW)
     if (lower === "แจ้งปัญหาการใช้งาน") {
@@ -613,28 +613,17 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ลบข�
         return reply(event, summary);
     }
 
-   // ========================================
-// 9. REGISTER FLOW (ฉบับแก้ไขบอทเงียบ - เก็บชื่อ, เบอร์, อีเมล)
-// ========================================
+   // 9. REGISTER FLOW (CORE) - ปรับปรุงให้ Flow ต่อเนื่อง
+    const isRegistered = user.realName && user.phone && user.email;
 
-// เช็คว่าลงทะเบียนครบหรือยัง
-const isRegistered = user.realName && user.phone && user.email;
+    // STEP: ถามชื่อจริง
+    if (user.step && user.step.startsWith("ask_realname")) {
+        if (!isStrictlyHumanName(text)) return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
+        
+        // ✨ แก้ไขจุดนี้: รับค่าที่ล้างแล้วจาก updateNameStats มาบันทึกลง user.realName
+        user.realName = await updateNameStats('real', text); 
 
-// --- STEP 1: การรับชื่อจริง (ask_realname) ---
-if (user.step && user.step.startsWith("ask_realname")) {
-    
-    // ดักกรณีที่เพิ่ง Reset มาแล้วทักเข้ามา (ให้บอทเริ่มถามชื่อ)
-    // ถ้าข้อความที่ส่งมาไม่ใช่ชื่อ (เช่น ทักทาย หรือ พิมพ์สั้นไป) ให้ถามชื่อซ้ำ
-    if (!text.includes(" ") && !user.realName) {
-         return reply(event, "สวัสดีครับน้อง! กรุณาพิมพ์ **ชื่อจริง-นามสกุล** (เว้นวรรคตรงกลาง) เพื่อเริ่มลงทะเบียนรับข้อมูลแผนกไอทีครับ");
-    }
-
-    // ตรวจสอบความถูกต้องของชื่อ
-    if (!isStrictlyHumanName(text)) {
-        return reply(event, "❌ กรุณาใช้ชื่อจริงและนามสกุลที่ถูกต้อง และสุภาพครับ");
-    }
-    
-    // บันทึกชื่อลงฐานข้อมูล
+        // บันทึกชื่อลงฐานข้อมูล
     user.realName = text; 
 
     // กรณีเปลี่ยนชื่ออย่างเดียว (_only)
