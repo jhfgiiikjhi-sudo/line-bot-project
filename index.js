@@ -849,7 +849,7 @@ if (user.step === "done") {
 
                     [ข้อมูลวิทยาลัยและสถานที่]
                     - ที่อยู่: ${collegeData.contact.Address}
-                    - แผนกไอที: อาคาร 9 ชั้น 4 (อาคารหน้าสุด)
+                    - แผนกไอที: อาคาร 7
                     - เวลาเรียน: ปกติ (${collegeData.academicTime.morning}), ภาคสมทบ/ค่ำ (${collegeData.academicTime.evening})
 
                     [ข้อมูลรับสมัครปีล่าสุด (อัปเดตตามประกาศวิทยาลัย)]
