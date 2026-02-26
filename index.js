@@ -571,34 +571,39 @@ async function handleEvent(event) {
         return reply(event, "⚠️ ระบบตรวจพบข้อความลักษณะสแปม กรุณาพิมพ์ข้อความที่มีความหมายครับ");
     }
 
-    // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต) - ล้างข้อมูลเกลี้ยง 100%
+    // 7. คำสั่งพิเศษ (เริ่มใหม่ / ลงทะเบียนใหม่) - ฉบับแก้ไขบอทเงียบ
 if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
-    await User.findOneAndUpdate(
-        { userId: user.userId },
-        { 
-            $set: { 
-                step: "ask_realname", 
-                badCount: 0 
-            },
-            $unset: { 
-                realName: "", 
-                phone: "", 
-                email: "", 
-                nickName: "", 
-                age: "", 
-                birthday: "", 
-                department: "" 
-            } // ลบฟิลด์ข้อมูลทิ้งทั้งหมดจากฐานข้อมูล (DB จะสะอาดเหมือนเพิ่งติดตั้ง)
-        }
-    );
-    
-    // ส่งข้อความยืนยันการล้างข้อมูล
-    return reply(event, [
-        { 
-            type: "text", 
-            text: "กรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มลงทะเบียนใหม่อีกครั้งครับ" 
-        }
-    ]);
+    try {
+        await User.findOneAndUpdate(
+            { userId: user.userId },
+            { 
+                $set: { 
+                    step: "ask_realname", 
+                    badCount: 0 
+                },
+                $unset: { 
+                    realName: "", 
+                    phone: "", 
+                    email: "", 
+                    nickName: "", 
+                    age: "", 
+                    birthday: "", 
+                    department: "" 
+                }
+            }
+        );
+
+        // ส่งข้อความ 2 จังหวะ: ยืนยันการลบ และ เริ่มขั้นตอนแรกทันที
+        return reply(event, [
+            { 
+                type: "text", 
+                text: "เพื่อเริ่มการใช้งานใหม่ กรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของน้องมาได้เลยครับ (เช่น นายสมชาย ใจดี)" 
+            }
+        ]);
+    } catch (err) {
+        console.error("❌ Reset Error:", err);
+        return reply(event, "เกิดข้อผิดพลาดในการรีเซ็ตข้อมูล ลองพิมพ์ 'เริ่มใหม่' อีกครั้งนะครับ");
+    }
 }
 
     // 8. ระบบแจ้งปัญหาการใช้งาน (REPORT FLOW)
