@@ -613,18 +613,22 @@ async function handleEvent(event) {
         return reply(event, summary);
     }
 
-   // 9. REGISTER FLOW (CORE) - ปรับปรุงให้ Flow ต่อเนื่อง
-    const isRegistered = user.realName && user.phone && user.email;
+   // ========================================
+// 9. REGISTER FLOW (CORE) - ฉบับเก็บชื่อเต็ม/ตอบชื่อเล่น/ตัดคำนำหน้า
+// ========================================
+const isRegistered = user.realName && user.phone && user.email;
 
-    // STEP: ถามชื่อจริง
-    if (user.step && user.step.startsWith("ask_realname")) {
-        if (!isStrictlyHumanName(text)) return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
-        
-        // ✨ แก้ไขจุดนี้: รับค่าที่ล้างแล้วจาก updateNameStats มาบันทึกลง user.realName
-        user.realName = await updateNameStats('real', text); 
+// --- STEP 1: การรับชื่อจริง (ask_realname) ---
+if (user.step && user.step.startsWith("ask_realname")) {
+    if (text.length < 2 || lower.includes("เริ่มใหม่")) return;
 
-        // บันทึกชื่อลงฐานข้อมูล
-    user.realName = text; 
+    if (!isStrictlyHumanName(text)) {
+        return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
+    }
+
+    // 1. [ฐานข้อมูล] คลีนชื่อ: ตัด นาย/นาง/นางสาว ออก แต่ยังเก็บชื่อ+นามสกุล
+    let cleanFullName = text.replace(/^(นาย|นางสาว|นาง|เด็กชาย|เด็กหญิง)\s?/g, "").trim();
+    user.realName = cleanFullName; 
 
     // กรณีเปลี่ยนชื่ออย่างเดียว (_only)
     if (user.step.endsWith("_only")) {
@@ -637,10 +641,12 @@ async function handleEvent(event) {
     user.step = "ask_phone";
     await user.save();
     
-    // ประโยคตอบรับหลังจากรับชื่อ (เพื่อให้ไม่เงียบ)
+    // 2. [ตอนตอบกลับ] เอาเฉพาะชื่อแรกมาทักทาย (ตัดนามสกุลออก)
+    const firstNameOnly = cleanFullName.split(" ")[0];
+    
     const welcomeMsg = lower.includes("เปลี่ยนชื่อ") 
-        ? `✅ อัปเดตชื่อจริงเรียบร้อยครับคุณ ${user.realName}` 
-        : `ยินดีที่ได้รู้จักครับน้อง **${user.realName}** 😊`;
+        ? `✅ อัปเดตชื่อเรียบร้อยครับน้อง **${firstNameOnly}**` 
+        : `ยินดีที่ได้รู้จักครับน้อง **${firstNameOnly}** 😊`;
 
     return reply(event, `${welcomeMsg}\nเพื่อความสะดวกในการให้ข้อมูล ขอทราบ **เบอร์โทรศัพท์** ที่ติดต่อได้หน่อยครับ`);
 }
@@ -682,7 +688,10 @@ if (user.step && user.step.startsWith("ask_email")) {
     user.step = "done";
     await user.save();
     
-    return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง **${user.realName}** ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรืออาจารย์ในแผนก** ได้เลยครับ! 🤖`);
+    // 3. [ตอนลงทะเบียนสำเร็จ] เรียกแค่ชื่อจริง (ไม่มีนามสกุล/ไม่มีนาย)
+    const firstNameOnly = user.realName.split(" ")[0];
+    
+    return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง **${firstNameOnly}** ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรืออาจารย์ในแผนก** ได้เลยครับ! 🤖`);
 }
 
     // 10. MULTI INTENT (ปรับปรุงให้ตอบได้หลายอย่างพร้อมกัน)
