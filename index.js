@@ -580,7 +580,7 @@ async function handleEvent(event) {
         user.email = undefined;
         user.badCount = 0; 
         await user.save();
-        return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มใหม่ครับ");
+        return reply(event, "🤖 รีเซ็ตข้อมูลให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของน้องเพื่อเริ่มลงทะเบียนใหม่ได้เลยครับ");
     }
     
     if (lower.includes("เปลี่ยนชื่อจริง")) { user.step = "ask_realname_only"; await user.save(); return reply(event, "พิมพ์ **ชื่อจริงใหม่** ได้เลยครับ"); }
@@ -640,7 +640,7 @@ async function handleEvent(event) {
     // ประโยคตอบรับหลังจากรับชื่อ (เพื่อให้ไม่เงียบ)
     const welcomeMsg = lower.includes("เปลี่ยนชื่อ") 
         ? `✅ อัปเดตชื่อจริงเรียบร้อยครับคุณ ${user.realName}` 
-        : `ยินดีที่ได้รู้จักครับคุณ **${user.realName}** 😊`;
+        : `ยินดีที่ได้รู้จักครับน้อง **${user.realName}** 😊`;
 
     return reply(event, `${welcomeMsg}\nเพื่อความสะดวกในการให้ข้อมูล ขอทราบ **เบอร์โทรศัพท์** ที่ติดต่อได้หน่อยครับ`);
 }
@@ -829,9 +829,6 @@ if (user.step === "done") {
                     - สถานที่ตั้งแผนกไอที: อาคาร 7
                     - พื้นที่วิทยาลัย: มีพื้นที่ทั้งหมด ${collegeArea} มีอาคารเรียน ${collegeData.physicalInfo.buildings}
                     - เบอร์ติดต่อสอบถาม: ${collegePhone}
-
-                    [รายชื่ออาจารย์แผนกไอที (อ้างอิงตามไฟล์จริง)]
-                    ${teacherList || "- อ.จารุณี (หัวหน้าแผนก)\n- อ.สุธาวี (ดูแลภาคสมทบ)"}
 
                     [การสมัครเรียนออนไลน์]
                     - ลิงก์สมัคร: https://admission.vec.go.th/web/student.htm?mode=register
