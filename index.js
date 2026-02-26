@@ -571,27 +571,34 @@ async function handleEvent(event) {
         return reply(event, "⚠️ ระบบตรวจพบข้อความลักษณะสแปม กรุณาพิมพ์ข้อความที่มีความหมายครับ");
     }
 
-    // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต)
+    // 7. คำสั่งพิเศษ (เปลี่ยนข้อมูล/รีเซ็ต) - ล้างข้อมูลเกลี้ยง 100%
 if (lower.includes("เริ่มใหม่") || lower.includes("ยกเลิก") || lower.includes("ลงทะเบียนใหม่")) {
     await User.findOneAndUpdate(
         { userId: user.userId },
         { 
             $set: { 
                 step: "ask_realname", 
-                realName: "", 
-                phone: "", 
-                email: "", 
                 badCount: 0 
             },
             $unset: { 
+                realName: "", 
+                phone: "", 
+                email: "", 
                 nickName: "", 
                 age: "", 
                 birthday: "", 
                 department: "" 
-            } // ลบฟิลด์ที่ไม่ได้ใช้แล้วออกจาก DB ทันที
+            } // ลบฟิลด์ข้อมูลทิ้งทั้งหมดจากฐานข้อมูล (DB จะสะอาดเหมือนเพิ่งติดตั้ง)
         }
     );
-    return reply(event, "🤖 รีเซ็ตระบบให้แล้วครับ! \n\nกรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มลงทะเบียนผู้สนใจครับ");
+    
+    // ส่งข้อความยืนยันการล้างข้อมูล
+    return reply(event, [
+        { 
+            type: "text", 
+            text: "กรุณาพิมพ์ **ชื่อจริง-นามสกุล** ของคุณเพื่อเริ่มลงทะเบียนใหม่อีกครั้งครับ" 
+        }
+    ]);
 }
 
     // 8. ระบบแจ้งปัญหาการใช้งาน (REPORT FLOW)
@@ -712,45 +719,86 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ยกเ�
         return reply(event, answers.join("\n")); // เชื่อมคำตอบด้วยการขึ้นบรรทัดใหม่
     }
 
-   // --- ระบบเช็คข่าวสาร (Smart News) ---
-    if (lower.includes("ข่าว")) {
-        // ดึงข่าวมาเผื่อ 5 ข่าว เพื่อให้มีตัวเลือกสำหรับ 'เมื่อวาน' (ลำดับที่ 3)
-        const newsList = await getLatestNews(5); 
-        
-        if (newsList && newsList.length > 0) {
-            let selectedNews = newsList[0]; // ค่าเริ่มต้น: ข่าวล่าสุด (ลำดับ 1)
-            let typeText = "ล่าสุด! 🔥";
+   // --- ระบบเช็คข่าวสาร (Smart News - ปรับปรุงใหม่) ---
+if (lower.includes("ข่าว")) {
+    // ดึงข่าวมา 5 ข่าว เพื่อให้มีตัวเลือกสำหรับข่าวเก่า/ย้อนหลัง
+    const newsList = await getLatestNews(5); 
+    
+    if (newsList && newsList.length > 0) {
+        let selectedNews = newsList[0]; // ค่าเริ่มต้น: ข่าวล่าสุด
+        let typeText = "ข่าวล่าสุด 🔥";
 
-            // 1. ถ้าถาม "เมื่อวาน" -> ให้ไปหยิบข่าวลำดับที่ 3 (Index 2)
-            if (lower.includes("เมื่อวาน")) {
-                if (newsList.length >= 3) {
-                    selectedNews = newsList[2]; 
-                    typeText = "ของเมื่อวาน 📅";
-                } else if (newsList.length === 2) {
-                    selectedNews = newsList[1]; // ถ้ามีแค่ 2 ข่าว ก็เอาข่าวที่มีก่อนหน้าแทน
-                    typeText = "ของเมื่อวาน 📅";
-                }
-            } 
-            // 2. ถ้าถาม "ก่อนหน้า/เก่า/ย้อนหลัง" -> ให้หยิบข่าวลำดับที่ 2 (Index 1)
-            else if (lower.includes("ก่อนหน้า") || lower.includes("เก่า") || lower.includes("ย้อนหลัง")) {
-                if (newsList.length > 1) {
-                    selectedNews = newsList[1];
-                    typeText = "ข่าวก่อนหน้า 📰";
-                } else {
-                    return reply(event, "📢 ตอนนี้พี่บอทพบข่าวล่าสุดเพียงข่าวเดียวครับ ยังไม่มีข่าวเก่าในระบบ");
-                }
-            } 
-            // 3. ถ้าถาม "วันนี้"
-            else if (lower.includes("วันนี้")) {
-                typeText = "ล่าสุดวันนี้! 🔥";
+        // 1. ถ้าถาม "เมื่อวาน" -> หยิบข่าวลำดับที่ 3 หรือข่าวที่มีก่อนหน้า
+        if (lower.includes("เมื่อวาน")) {
+            if (newsList.length >= 3) {
+                selectedNews = newsList[2]; 
+                typeText = "ข่าวของเมื่อวาน 📅";
+            } else if (newsList.length >= 2) {
+                selectedNews = newsList[1];
+                typeText = "ข่าวของเมื่อวาน 📅";
             }
+        } 
+        // 2. ถ้าถาม "ก่อนหน้า/เก่า/ย้อนหลัง" -> หยิบข่าวลำดับที่ 2
+        else if (lower.includes("ก่อนหน้า") || lower.includes("เก่า") || lower.includes("ย้อนหลัง")) {
+            if (newsList.length > 1) {
+                selectedNews = newsList[1];
+                typeText = "ข่าวก่อนหน้า 📰";
+            } else {
+                return reply(event, "📢 ตอนนี้พี่บอทพบข่าวล่าสุดเพียงข่าวเดียวครับ ยังไม่มีข่าวเก่าในระบบ");
+            }
+        } 
 
-            return reply(event, `📢 **ข่าวประชาสัมพันธ์** (${typeText})\nเรื่อง: ${selectedNews.title}\n🔗 อ่านต่อ: ${selectedNews.link}`);
-        } else if (global.latestNewsTitle) {
-            return reply(event, `📢 **ข่าวประชาสัมพันธ์** (ล่าสุด)\nเรื่อง: ${global.latestNewsTitle}\n🔗 อ่านต่อ: ${global.latestNewsLink}`);
-        }
-        return reply(event, "📢 ขออภัยครับ ไม่สามารถดึงข่าวได้ในขณะนี้");
+        // ส่งเป็น Flex Message เพื่อให้มีรูปภาพและวันที่ที่ดึงมาจากหน้าเว็บ
+        return reply(event, {
+            type: "flex",
+            altText: `📰 ${typeText}: ${selectedNews.title}`,
+            contents: {
+                type: "bubble",
+                hero: {
+                    type: "image",
+                    url: selectedNews.image || "https://it.sptc.ac.th/home/wp-content/uploads/2023/logo-it.png",
+                    size: "full",
+                    aspectRatio: "20:13",
+                    aspectMode: "cover"
+                },
+                body: {
+                    type: "box",
+                    layout: "vertical",
+                    contents: [
+                        { type: "text", text: typeText, weight: "bold", color: "#007bff", size: "sm" },
+                        { type: "text", text: selectedNews.title, weight: "bold", size: "md", wrap: true, margin: "md" },
+                        {
+                            type: "box",
+                            layout: "baseline",
+                            margin: "md",
+                            contents: [
+                                { type: "text", text: "📅", size: "sm", color: "#aaaaaa", flex: 0 },
+                                { type: "text", text: `ประกาศเมื่อ: ${selectedNews.date || "ไม่ระบุ"}`, size: "xs", color: "#aaaaaa", margin: "sm" }
+                            ]
+                        }
+                    ]
+                },
+                footer: {
+                    type: "box",
+                    layout: "vertical",
+                    contents: [
+                        {
+                            type: "button",
+                            action: { type: "uri", label: "อ่านรายละเอียด", uri: selectedNews.link },
+                            style: "primary",
+                            color: "#1a2a6c"
+                        }
+                    ]
+                }
+            }
+        });
+
+    } else if (global.latestNewsTitle) {
+        // Fallback กรณีดึง List ไม่ได้ แต่มีข้อมูล Global อยู่
+        return reply(event, `📢 **ข่าวประชาสัมพันธ์** (ล่าสุด)\nเรื่อง: ${global.latestNewsTitle}\n📅 วันที่: ${global.latestNewsDate}\n🔗 อ่านต่อ: ${global.latestNewsLink}`);
     }
+    return reply(event, "📢 ขออภัยครับ ไม่สามารถดึงข่าวได้ในขณะนี้ ลองพิมพ์ว่า 'ข่าว' อีกครั้งนะครับ");
+}
 
     if (lower.includes("ปีใหม่") && (lower.includes("อีกกี่วัน") || lower.includes("เหลืออีก"))) {
         const nextYear = now.year() + 1;
@@ -760,46 +808,74 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ยกเ�
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-   // 11. AI FALLBACK - ฉบับผู้เชี่ยวชาญแผนกไอที (Expert Mode)
+   // 11. AI FALLBACK - ฉบับรวมฐานข้อมูลวิทยาลัยและแผนกไอที (ไฟล์ล่าสุด)
 if (user.step === "done") {
     try {
-        const dateStr = now.format("LLLL"); 
-        
-        // 👉 แก้ปัญหาที่ 1: ตัดนามสกุลออก เอาเฉพาะชื่อแรกมาเรียก (บุญฤทธิ์ เจียะคง -> น้องบุญฤทธิ์)
         const firstName = user.realName ? user.realName.split(" ")[0] : "น้อง";
+
+        // 👉 เตรียมข้อมูลจากไฟล์ teacherData.js (เจาะจงแผนกไอที)
+        const itTeachers = teacherData["แผนกวิชาเทคโนโลยีสารสนเทศ"] || teacherData["ดิจิทัลและสารสนเทศ"] || [];
+        const teacherList = itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : t.position})`).join("\n");
+        
+        // 👉 เตรียมข้อมูลจากไฟล์ collegeData.js
+        const collegeAddr = collegeData.contact.Address;
+        const collegePhone = collegeData.contact.PhoneNumber;
+        const collegeArea = collegeData.physicalInfo.area;
+
+        // ข่าวล่าสุดจาก Global
+        const currentNews = `${global.latestNewsTitle} (${global.latestNewsDate || "วันศุกร์ที่ 20 กุมภาพันธ์ 2569"})`;
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท IT" ผู้เชี่ยวชาญประจำแผนกเทคโนโลยีสารสนเทศ วิทยาลัยเทคนิคสมุทรปราการ
+                    content: `คุณคือ "พี่บอท IT" ผู้เชี่ยวชาญประจำ ${collegeData.collegeName}
                     
-                    [ข้อมูลผู้คุย]
-                    - ชื่อเรียก: ${firstName}
-                    - ข้อมูลติดต่อ: เบอร์ ${user.phone || "ไม่ระบุ"}, เมล ${user.email || "ไม่ระบุ"}
-                    
-                    [ข้อมูลที่ต้องตอบอย่างมั่นใจ (Knowledge Base)]
-                    - ปวส. ปกติ: เรียนจันทร์-ศุกร์ เน้นปฏิบัติทางด้าน Network, Software Development และ IT Support
-                    - ปวส. ภาคสมทบ: เรียนวันอาทิตย์วันเดียว (08.00-17.00 น.) เหมาะสำหรับคนทำงานที่ต้องการวุฒิเพิ่ม
-                    - การรับสมัครปี 69: รอบโควตา (ถึง 23 ม.ค. 69), รอบปกติ (ถึง 18 มี.ค. 69)
-                    - เอกสารที่ต้องเตรียม: 1.ใบสมัครวิทยาลัย 2.สำเนาบัตรประชาชน/ทะเบียนบ้าน 3.วุฒิการศึกษาเดิม (ปวช./ม.6) 4.รูปถ่าย 1 นิ้ว
-                    - สถานที่: แผนกไอทีตั้งอยู่ที่ อาคาร 9 ชั้น 4 (อาคารหน้าสุด) เข้ามาคุยกับอาจารย์ได้โดยตรง
-                    - อาจารย์ผู้ดูแล: อ.จารุณี (หัวหน้าแผนก) และ อ.สุธาวี (ดูแลภาคสมทบ)
+                    [ข้อมูลวิทยาลัยและสถานที่ตั้ง]
+                    - ที่อยู่ปัจจุบัน: ${collegeAddr} (ใช้ที่อยู่นี้เมื่อมีคนถามว่าวิทยาลัยอยู่ที่ไหน)
+                    - สถานที่ตั้งแผนกไอที: อาคาร 7
+                    - พื้นที่วิทยาลัย: มีพื้นที่ทั้งหมด ${collegeArea} มีอาคารเรียน ${collegeData.physicalInfo.buildings}
+                    - เบอร์ติดต่อสอบถาม: ${collegePhone}
 
-                    [กฎเหล็กในการตอบ]
-                    1. **ห้ามพูดว่า** "พี่บอทดูแลข้อมูลแผนกไอทีเป็นหลัก" หรือ "ให้ไปหาอ่านเองในเว็บ" (มันดูไม่ฉลาดและเสียความรู้สึก)
-                    2. ให้ใช้ข้อมูลที่มีอยู่นี้ตอบอย่างมั่นใจที่สุด หากถามเรื่องที่ไม่มีในนี้ ให้พยายามให้ข้อมูลใกล้เคียงที่ช่วยเหลือน้องได้มากที่สุด
-                    3. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ทุกครั้ง
-                    4. หากผู้ใช้ถามเรื่องเอกสาร หรือวิธีสมัคร ให้สรุปเป็นข้อๆ ให้ชัดเจนอ่านง่าย
-                    5. รักษาบุคลิกพี่ชายใจดีที่เชี่ยวชาญด้านไอที สุภาพ มีหางเสียง (ครับ)` 
+                    [รายชื่ออาจารย์แผนกไอที (อ้างอิงตามไฟล์จริง)]
+                    ${teacherList || "- อ.จารุณี (หัวหน้าแผนก)\n- อ.สุธาวี (ดูแลภาคสมทบ)"}
+
+                    [การสมัครเรียนออนไลน์]
+                    - ลิงก์สมัคร: https://admission.vec.go.th/web/student.htm?mode=register
+                    - เอกสาร ปวช.: วุฒิ ม.3, สำเนาบัตรประชาชน/ทะเบียนบ้าน (นศ.+ผู้ปกครอง), รูปถ่าย 1 นิ้ว
+                    - เอกสาร ปวส.: วุฒิ ปวช./ม.6, สำเนาบัตรประชาชน/ทะเบียนบ้าน, รูปถ่าย 1 นิ้ว
+                    - เอกสาร ป.ตรี: วุฒิ ปวส. ไอทีหรือสาขาที่เกี่ยวข้อง, ระเบียนแสดงผลการเรียน (GPA)
+
+                    [กฎการตอบ]
+                    1. เมื่อถามว่า "วิทยาลัยอยู่ที่ไหน" ต้องตอบที่อยู่เต็มจากข้อมูล [ที่อยู่ปัจจุบัน] ห้ามตอบแค่ที่แผนกอย่างเดียว
+                    2. หากถามเรื่อง "อาจารย์" หรือ "ติดต่อใคร" ให้ดึงรายชื่ออาจารย์ข้างต้นมาตอบ และแจ้งเบอร์ ${collegePhone}
+                    3. หากถามเรื่องสมัครเรียน ให้ส่งลิงก์สมัครออนไลน์และสรุปเอกสารให้ครบตามระดับชั้น
+                    4. ห้ามปฏิเสธว่าไม่มีข้อมูล ป.ตรี ให้ใช้ข้อมูลข้างต้นตอบ
+                    5. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" เสมอ`
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.5 // ลดค่าลงเพื่อให้ AI ตอบอยู่ในกรอบข้อมูลที่เราให้
+            temperature: 0.4
         });
 
-        return reply(event, aiResponse.choices[0].message.content);
+        const aiMsg = aiResponse.choices[0].message.content;
+
+        // 👉 เช็คเงื่อนไขส่ง QR Code (เมื่อถามเรื่องสมัครเรียน หรือ เอกสาร)
+        if (aiMsg.includes("สมัคร") || aiMsg.includes("เอกสาร") || aiMsg.includes("ออนไลน์")) {
+            const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=https://admission.vec.go.th/web/student.htm?mode=register";
+            
+            return client.replyMessage(event.replyToken, [
+                { type: "text", text: aiMsg },
+                { 
+                    type: "image", 
+                    originalContentUrl: qrUrl,
+                    previewImageUrl: qrUrl
+                }
+            ]);
+        }
+
+        return reply(event, aiMsg);
     } catch (e) {
         console.error("AI Error:", e);
         return reply(event, `ขออภัยครับน้อง ${firstName} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
