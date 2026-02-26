@@ -624,71 +624,78 @@ if (lower.includes("เริ่มใหม่") || lower.includes("ยกเ�
         return reply(event, summary);
     }
 
-   // 9. REGISTER FLOW (โหมดรวดเร็วสำหรับนักศึกษาใหม่/Open House)
-    // เปลี่ยนเงื่อนไขการเช็ค: ต้องมี ชื่อจริง, เบอร์โทร, และอีเมล ถึงจะถือว่าลงทะเบียนครบ
-    const isRegistered = user.realName && user.phone && user.email;
+   // ========================================
+// 9. REGISTER FLOW (เก็บข้อมูล: ชื่อจริง, เบอร์โทร, อีเมล)
+// ========================================
 
-    // STEP 1: ถามชื่อจริง
-    if (user.step && user.step.startsWith("ask_realname")) {
-        if (!isStrictlyHumanName(text)) return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
-        
-        // ล้างชื่อและเก็บสถิติ (คงไว้ตามที่คุณต้องการ)
-        user.realName = await updateNameStats('real', text); 
+// เช็คสถานะการลงทะเบียน (ต้องมีครบ 3 อย่าง)
+const isRegistered = user.realName && user.phone && user.email;
 
-        // กรณีเปลี่ยนชื่ออย่างเดียว
-        if (user.step.endsWith("_only")) {
-            user.step = "done"; 
-            await user.save();
-            return reply(event, `✅ เปลี่ยนชื่อจริงเป็น: ${user.realName} เรียบร้อยครับ`);
-        }
-        
-        user.step = "ask_phone";
+// 🟢 [สำคัญ] ถ้ายังไม่ได้ลงทะเบียน และไม่ได้อยู่ใน Step ไหนเลย ให้เริ่มถามชื่อทันที
+if (!isRegistered && user.step === "ask_realname" && !lower.includes("เริ่มใหม่")) {
+    // โค้ดส่วนนี้จะทำงานเมื่อ User ทักอะไรมาครั้งแรกหลังจากรีเซ็ต หรือเข้ามาใหม่
+    if (text.length < 2) { 
+        return reply(event, "สวัสดีครับน้อง! กรุณาพิมพ์ **ชื่อจริง-นามสกุล** เพื่อเริ่มลงทะเบียนรับข้อมูลแผนกไอทีครับ");
+    }
+}
+
+// STEP 1: รับชื่อจริง
+if (user.step && user.step.startsWith("ask_realname")) {
+    if (!isStrictlyHumanName(text)) return reply(event, "❌ กรุณาใช้ชื่อจริงที่ถูกต้อง (ภาษาไทย/อังกฤษ) และสุภาพครับ");
+    
+    // บันทึกชื่อ
+    user.realName = text; 
+
+    if (user.step.endsWith("_only")) {
+        user.step = "done"; 
         await user.save();
-        const prefix = lower.includes("เปลี่ยนชื่อ") ? `✅ อัปเดตชื่อจริงเรียบร้อยครับคุณ ${user.realName}\n` : `ยินดีที่ได้รู้จักครับคุณ ${user.realName} 😊\n`;
-        return reply(event, `${prefix}เพื่อความสะดวกในการให้ข้อมูล ขอทราบ **เบอร์โทรศัพท์** ที่ติดต่อได้หน่อยครับ`);
+        return reply(event, `✅ เปลี่ยนชื่อจริงเป็น: ${user.realName} เรียบร้อยครับ`);
+    }
+    
+    user.step = "ask_phone";
+    await user.save();
+    const prefix = lower.includes("เปลี่ยนชื่อ") ? `✅ อัปเดตชื่อจริงเรียบร้อยครับคุณ ${user.realName}\n` : `ยินดีที่ได้รู้จักครับคุณ ${user.realName} 😊\n`;
+    return reply(event, `${prefix}เพื่อความสะดวกในการให้ข้อมูล ขอทราบ **เบอร์โทรศัพท์** ที่ติดต่อได้หน่อยครับ`);
+}
+
+// STEP 2: รับเบอร์โทรศัพท์
+if (user.step && user.step.startsWith("ask_phone")) {
+    const phoneRegex = /^[0-9]{9,10}$/;
+    const cleanPhone = text.replace(/-/g, "").trim(); 
+    
+    if (!phoneRegex.test(cleanPhone)) {
+        return reply(event, "❌ กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (เป็นตัวเลข 9-10 หลัก) ครับ");
+    }
+    
+    user.phone = cleanPhone;
+
+    if (user.step.endsWith("_only")) {
+        user.step = "done"; 
+        await user.save();
+        return reply(event, `✅ อัปเดตเบอร์โทรเป็น: ${user.phone} เรียบร้อยครับ`);
     }
 
-    // STEP 2: ถามเบอร์โทรศัพท์ (แทนที่การถามชื่อเล่น/อายุ)
-    if (user.step && user.step.startsWith("ask_phone")) {
-        // ตรวจสอบเบอร์โทร 9-10 หลัก
-        const phoneRegex = /^[0-9]{9,10}$/;
-        const cleanPhone = text.replace(/-/g, "").trim(); 
-        
-        if (!phoneRegex.test(cleanPhone)) {
-            return reply(event, "❌ กรุณากรอกเบอร์โทรศัพท์ที่ถูกต้อง (เป็นตัวเลข 9-10 หลัก) ครับ");
-        }
-        
-        user.phone = cleanPhone;
+    user.step = "ask_email";
+    await user.save();
+    return reply(event, `บันทึกเบอร์โทรศัพท์เรียบร้อยครับ ต่อไปขอทราบ **อีเมล** เพื่อใช้ส่งระเบียบการครับ\n(หากไม่มีให้พิมพ์ว่า **'ไม่มี'** ครับ)`);
+}
 
-        // กรณีเปลี่ยนเบอร์อย่างเดียว
-        if (user.step.endsWith("_only")) {
-            user.step = "done"; 
-            await user.save();
-            return reply(event, `✅ อัปเดตเบอร์โทรเป็น: ${user.phone} เรียบร้อยครับ`);
+// STEP 3: รับอีเมล
+if (user.step && user.step.startsWith("ask_email")) {
+    if (text === "ไม่มี") {
+        user.email = "ไม่ได้ระบุ";
+    } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(text)) {
+            return reply(event, "❌ รูปแบบอีเมลไม่ถูกต้องครับ (เช่น example@mail.com)\nหากไม่สะดวกระบุ ให้พิมพ์ว่า **'ไม่มี'** ได้เลยครับ");
         }
-
-        user.step = "ask_email";
-        await user.save();
-        return reply(event, `บันทึกเบอร์โทรศัพท์เรียบร้อยครับ ต่อไปขอทราบ **อีเมล** เพื่อใช้ส่งระเบียบการครับ\n(หากไม่มีให้พิมพ์ว่า **'ไม่มี'** ครับ)`);
+        user.email = text;
     }
 
-    // STEP 3: ถามอีเมล (แทนที่การถามแผนก/วันเกิด)
-    if (user.step && user.step.startsWith("ask_email")) {
-        if (text === "ไม่มี") {
-            user.email = "ไม่ได้ระบุ";
-        } else {
-            // ตรวจสอบรูปแบบ Email
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(text)) {
-                return reply(event, "❌ รูปแบบอีเมลไม่ถูกต้องครับ (เช่น example@mail.com)\nหากไม่สะดวกระบุ ให้พิมพ์ว่า **'ไม่มี'** ได้เลยครับ");
-            }
-            user.email = text;
-        }
-
-        user.step = "done";
-        await user.save();
-        return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง ${user.realName} ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรือกิจกรรมแผนก** ได้เลยครับ! 🤖`);
-    }
+    user.step = "done";
+    await user.save();
+    return reply(event, `🎉 ลงทะเบียนสำเร็จ!\n\nขอบคุณน้อง ${user.realName} ที่ให้ความสนใจแผนกไอทีครับ\nตอนนี้ถามคำถามที่อยากรู้เกี่ยวกับ **การสมัครเรียน, ภาคสมทบ หรือกิจกรรมแผนก** ได้เลยครับ! 🤖`);
+}
 
     // 10. MULTI INTENT (ปรับปรุงให้ตอบได้หลายอย่างพร้อมกัน)
     let answers = []; 
