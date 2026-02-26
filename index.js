@@ -810,75 +810,63 @@ if (lower.includes("ข่าว")) {
     }
 
    // ========================================
-// 11. AI FALLBACK - ฉบับสมบูรณ์ (ดึงข้อมูลไฟล์จริง + QR เฉพาะออนไลน์)
+// 11. AI FALLBACK - ฉบับฉลาดที่สุด (Full Data Knowledge & Zero Refusal)
 // ========================================
 if (user.step === "done") {
     try {
         const firstName = user.realName ? user.realName.split(" ")[0] : "น้อง";
-
-        // 1. 👉 เตรียมข้อมูลจากไฟล์ teacherData.js (เน้นแผนกไอที)
+        
+        // 1. 👉 เตรียมข้อมูลอาจารย์ (ดึงจากไฟล์จริง)
         const itTeachers = teacherData["แผนกวิชาเทคโนโลยีสารสนเทศ"] || teacherData["ดิจิทัลและสารสนเทศ"] || [];
         const teacherList = itTeachers.length > 0 
-            ? itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : t.position})`).join("\n")
-            : "- อ.จารุณี (หัวหน้าแผนก)\n- อ.สุธาวี (ดูแลภาคสมทบ)";
+            ? itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : "อาจารย์ประจำ"})`).join("\n")
+            : "- นางจารุณี มะขามป้อม (อ.จารุณี)\n- นางสาวสุธาวี บุญสายัง (อ.สุธาวี)";
         
-        // 2. 👉 เตรียมข้อมูลจากไฟล์ collegeData.js (ดึงมาทุกส่วนสำคัญ)
-        const collegeAddr = collegeData.contact.Address;
-        const collegePhone = collegeData.contact.PhoneNumber;
-        const collegeArea = collegeData.physicalInfo.area;
-        const collegeBuildings = collegeData.physicalInfo.buildings;
-        
-        // ข้อมูลเวลาเรียน (ภาคปกติ/สมทบ)
-        const timeMorning = collegeData.academicTime.morning;
-        const timeEvening = collegeData.academicTime.evening;
-
-        // ข่าวล่าสุดจาก Global
-        const currentNews = `${global.latestNewsTitle || "ข่าวประชาสัมพันธ์วิทยาลัย"} (${global.latestNewsDate || "อัปเดตล่าสุด"})`;
+        // 2. 👉 ข้อมูลวันรับสมัคร (ระบุให้ชัดเพื่อไม่ให้ AI ตอบว่าไม่รู้)
+        const admissionFacts = `รอบปกติเปิดรับสมัครช่วงเดือนกุมภาพันธ์ - มีนาคม ของทุกปี โดยสามารถสมัครผ่านระบบออนไลน์ได้ทันที`;
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท IT" ผู้เชี่ยวชาญประจำ ${collegeData.collegeName}
+                    content: `คุณคือ "พี่บอท IT" ผู้รอบรู้และเป็นกันเองที่สุดประจำ ${collegeData.collegeName}
                     
-                    [ข้อมูลวิทยาลัยและสถานที่ตั้ง]
-                    - ที่อยู่ปัจจุบัน: ${collegeAddr} (ใช้ที่อยู่นี้เมื่อมีคนถามว่าวิทยาลัยอยู่ที่ไหน)
-                    - พื้นที่วิทยาลัย: ${collegeArea} มีอาคารเรียนทั้งหมด ${collegeBuildings} หลัง
-                    - สถานที่ตั้งแผนกไอที: อาคาร 9 ชั้น 4 (อาคารหน้าสุด)
-                    - เบอร์ติดต่อ: ${collegePhone}
+                    [ข้อมูลส่วนตัวของผู้ใช้ - ห้ามบอกว่าไม่รู้ถ้าโดนถาม]
+                    - ชื่อจริง-นามสกุล: ${user.realName}
+                    - เบอร์โทรศัพท์: ${user.phone || "ไม่ได้ระบุ"}
+                    - อีเมล: ${user.email || "ไม่ได้ระบุ"}
+                    - ชื่อที่คุณใช้เรียกเขา: น้อง${firstName}
 
-                    [ข้อมูลเวลาเรียน]
-                    - ภาคปกติ (เช้า/บ่าย): ${timeMorning}
-                    - ภาคสมทบ (ค่ำ/เสาร์-อาทิตย์): ${timeEvening}
-
-                    [รายชื่ออาจารย์ในแผนกไอที]
+                    [ข้อมูลวิทยาลัยจากไฟล์]
+                    - ที่อยู่: ${collegeData.contact.Address}
+                    - พื้นที่: ${collegeData.physicalInfo.area} อาคารเรียน ${collegeData.physicalInfo.buildings} หลัง
+                    - เวลาเรียนปกติ: ${collegeData.academicTime.morning}
+                    - เวลาเรียนภาคสมทบ/ค่ำ: ${collegeData.academicTime.evening}
+                    
+                    [ข้อมูลการรับสมัครและแผนก]
+                    - วันรับสมัคร: ${admissionFacts}
+                    - รายชื่ออาจารย์ไอที: 
                     ${teacherList}
+                    - ลิงก์สมัครออนไลน์: https://admission.vec.go.th/web/student.htm?mode=register
 
-                    [การสมัครเรียนออนไลน์]
-                    - ลิงก์สมัคร: https://admission.vec.go.th/web/student.htm?mode=register
-                    - เอกสาร ปวช.: วุฒิ ม.3, สำเนาบัตรประชาชน/ทะเบียนบ้าน (นศ.+ผู้ปกครอง), รูปถ่าย 1 นิ้ว
-                    - เอกสาร ปวส.: วุฒิ ปวช./ม.6, สำเนาบัตรประชาชน/ทะเบียนบ้าน, รูปถ่าย 1 นิ้ว
-                    - เอกสาร ป.ตรี: วุฒิ ปวส. ไอทีหรือสาขาที่เกี่ยวข้อง, ระเบียนแสดงผลการเรียน (GPA)
-
-                    [กฎเหล็กการตอบ]
-                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ทุกประโยค
-                    2. เมื่อถามว่า "วิทยาลัยอยู่ที่ไหน" ต้องตอบที่อยู่เต็มจากข้อมูล [ที่อยู่ปัจจุบัน]
-                    3. ถามเรื่อง "อาจารย์" ให้ดึงรายชื่ออาจารย์จากด้านบนมาตอบให้ครบ
-                    4. ถามเรื่อง "เวลาเรียน" ให้แจ้งทั้งเวลาภาคปกติและภาคสมทบตามข้อมูลที่มี
-                    5. ข่าวล่าสุด: ${currentNews}`
+                    [กฎเหล็กและบุคลิกภาพ]
+                    1. **ห้ามปฏิเสธการตอบ** ห้ามบอกว่า "ไม่มีข้อมูล" หรือ "ให้ไปถามที่อื่น" ถ้าข้อมูลไม่ชัดเจนให้ใช้ข้อมูลที่ใกล้เคียงที่สุดตอบ
+                    2. ตอบคำถามเรื่องข้อมูลส่วนตัวของผู้ใช้ได้ทันที (ชื่อ/เบอร์/อีเมล) เพราะคุณถือข้อมูลเขาอยู่
+                    3. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ในทุกประโยค
+                    4. หากถามเรื่องสมัครเรียน ให้สรุปเอกสาร (วุฒิ ม.3/ปวช, สำเนาบัตรประชาชน, รูปถ่าย) และให้ลิงก์สมัครเสมอ
+                    5. แสดงความกระตือรือร้นในการช่วยเหลือน้องๆ เสมอ`
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.4
+            temperature: 0.3 // ลดความเพ้อเจ้อ เน้นความถูกต้องของข้อมูล
         });
 
         const aiMsg = aiResponse.choices[0].message.content;
 
-        // 3. ✨ เงื่อนไขส่ง QR Code: ส่งเฉพาะเมื่อถามถึง "สมัครเรียน" + "ออนไลน์" เท่านั้น
+        // 3. ✨ ส่ง QR Code เฉพาะเมื่อมีคำว่า "ออนไลน์" ในคำถาม (ตามที่สั่งไว้)
         if (lower.includes("สมัคร") && lower.includes("ออนไลน์")) {
             const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=https://admission.vec.go.th/web/student.htm?mode=register";
-            
             return client.replyMessage(event.replyToken, [
                 { type: "text", text: aiMsg },
                 { 
@@ -889,13 +877,13 @@ if (user.step === "done") {
             ]);
         }
 
-        // กรณีถามสมัครเรียน หรือ เอกสาร (แบบไม่ออนไลน์) ส่งแค่ข้อความ AI
+        // กรณีปกติส่งแค่ข้อความ
         return reply(event, aiMsg);
 
     } catch (e) {
         console.error("AI Error:", e);
-        const firstNameFallback = user.realName ? user.realName.split(" ")[0] : "น้อง";
-        return reply(event, `ขออภัยครับน้อง ${firstNameFallback} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
+        const fallbackName = user.realName ? user.realName.split(" ")[0] : "น้อง";
+        return reply(event, `ขอโทษทีครับน้อง ${fallbackName} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
     }
 }
 }
