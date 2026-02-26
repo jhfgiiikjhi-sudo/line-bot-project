@@ -809,62 +809,74 @@ if (lower.includes("ข่าว")) {
         return reply(event, `🎆 นับถอยหลังสู่ปีใหม่ ${nextYear}!\n\n🗓 อีกประมาณ **${daysLeft} วัน ${hoursLeft} ชั่วโมง** จะถึงวันขึ้นปีใหม่ครับ!✨`);
     }
 
-   // ========================================
-// 11. AI FALLBACK - ฉบับฉลาดที่สุด (Full Data Knowledge & Zero Refusal)
+  // ========================================
+// 11. AI FALLBACK - ฉบับดีที่สุด (Dynamic News & Zero Refusal)
 // ========================================
 if (user.step === "done") {
     try {
         const firstName = user.realName ? user.realName.split(" ")[0] : "น้อง";
         
-        // 1. 👉 เตรียมข้อมูลอาจารย์ (ดึงจากไฟล์จริง)
-        const itTeachers = teacherData["แผนกวิชาเทคโนโลยีสารสนเทศ"] || teacherData["ดิจิทัลและสารสนเทศ"] || [];
+        // 1. 👉 ดึงเวลาปัจจุบัน (ช่วยให้ AI ตัดสินใจเรื่องช่วงเวลารับสมัครได้แม่นยำขึ้น)
+        const now = moment().tz("Asia/Bangkok");
+        const currentDateTimeThai = `วัน${now.format("dddd")}ที่ ${now.format("LL")} เวลา ${now.format("HH:mm")} น.`;
+
+        // 2. 👉 เตรียมข้อมูลอาจารย์และเบอร์ติดต่อ (เจาะจง อ.สุธาวี ตามสั่ง)
+        const itTeachers = teacherData["แผนกวิชาเทคโนโลยีสารสนเทศ"] || [];
         const teacherList = itTeachers.length > 0 
             ? itTeachers.map(t => `- ${t.name} (${t.positions ? t.positions.join(", ") : "อาจารย์ประจำ"})`).join("\n")
-            : "- นางจารุณี มะขามป้อม (อ.จารุณี)\n- นางสาวสุธาวี บุญสายัง (อ.สุธาวี)";
+            : "- อ.กมลลักษณ์ (หัวหน้าแผนก)\n- อ.สุธาวี (063-103-0288)";
         
-        // 2. 👉 ข้อมูลวันรับสมัคร (ระบุให้ชัดเพื่อไม่ให้ AI ตอบว่าไม่รู้)
-        const admissionFacts = `รอบปกติเปิดรับสมัครช่วงเดือนกุมภาพันธ์ - มีนาคม ของทุกปี โดยสามารถสมัครผ่านระบบออนไลน์ได้ทันที`;
+        const directContact = "อ.สุธาวี บุญสายัง (เบอร์โทร: 063-103-0288)";
+
+        // 3. 👉 ดึงข้อมูลประกาศล่าสุดจากหน้าเพจ/เว็บ (Dynamic Data)
+        // ข้อมูลนี้จะเปลี่ยนไปตามที่ Scraper ดึงมาได้ ทำให้ข้อมูลปีหน้าอัปเดตอัตโนมัติ
+        const webNews = global.latestNewsTitle 
+            ? `ประกาศล่าสุดจากวิทยาลัย: ${global.latestNewsTitle} (ข้อมูลเมื่อ: ${global.latestNewsDate})`
+            : "ช่วงการรับสมัครปกติ: 26 ม.ค. - 18 มี.ค. ของทุกปี (อ้างอิงตามประกาศล่าสุด)";
 
         const aiResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 { 
                     role: "system", 
-                    content: `คุณคือ "พี่บอท IT" ผู้รอบรู้และเป็นกันเองที่สุดประจำ ${collegeData.collegeName}
+                    content: `คุณคือ "พี่บอท IT" ผู้ช่วยอัจฉริยะประจำ ${collegeData.collegeName}
                     
-                    [ข้อมูลส่วนตัวของผู้ใช้ - ห้ามบอกว่าไม่รู้ถ้าโดนถาม]
-                    - ชื่อจริง-นามสกุล: ${user.realName}
-                    - เบอร์โทรศัพท์: ${user.phone || "ไม่ได้ระบุ"}
-                    - อีเมล: ${user.email || "ไม่ได้ระบุ"}
-                    - ชื่อที่คุณใช้เรียกเขา: น้อง${firstName}
+                    [ข้อมูลเวลาปัจจุบัน]
+                    - ${currentDateTimeThai}
 
-                    [ข้อมูลวิทยาลัยจากไฟล์]
+                    [ข้อมูลส่วนตัวผู้ใช้]
+                    - ชื่อ: ${user.realName} | เบอร์: ${user.phone || "ไม่ระบุ"} | อีเมล: ${user.email || "ไม่ระบุ"}
+
+                    [ข้อมูลวิทยาลัยและสถานที่]
                     - ที่อยู่: ${collegeData.contact.Address}
-                    - พื้นที่: ${collegeData.physicalInfo.area} อาคารเรียน ${collegeData.physicalInfo.buildings} หลัง
-                    - เวลาเรียนปกติ: ${collegeData.academicTime.morning}
-                    - เวลาเรียนภาคสมทบ/ค่ำ: ${collegeData.academicTime.evening}
-                    
-                    [ข้อมูลการรับสมัครและแผนก]
-                    - วันรับสมัคร: ${admissionFacts}
-                    - รายชื่ออาจารย์ไอที: 
-                    ${teacherList}
-                    - ลิงก์สมัครออนไลน์: https://admission.vec.go.th/web/student.htm?mode=register
+                    - แผนกไอที: อาคาร 9 ชั้น 4 (อาคารหน้าสุด)
+                    - เวลาเรียน: ปกติ (${collegeData.academicTime.morning}), ภาคสมทบ/ค่ำ (${collegeData.academicTime.evening})
 
-                    [กฎเหล็กและบุคลิกภาพ]
-                    1. **ห้ามปฏิเสธการตอบ** ห้ามบอกว่า "ไม่มีข้อมูล" หรือ "ให้ไปถามที่อื่น" ถ้าข้อมูลไม่ชัดเจนให้ใช้ข้อมูลที่ใกล้เคียงที่สุดตอบ
-                    2. ตอบคำถามเรื่องข้อมูลส่วนตัวของผู้ใช้ได้ทันที (ชื่อ/เบอร์/อีเมล) เพราะคุณถือข้อมูลเขาอยู่
-                    3. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ในทุกประโยค
-                    4. หากถามเรื่องสมัครเรียน ให้สรุปเอกสาร (วุฒิ ม.3/ปวช, สำเนาบัตรประชาชน, รูปถ่าย) และให้ลิงก์สมัครเสมอ
-                    5. แสดงความกระตือรือร้นในการช่วยเหลือน้องๆ เสมอ`
+                    [ข้อมูลรับสมัครปีล่าสุด (อัปเดตตามประกาศวิทยาลัย)]
+                    - ${webNews}
+                    - วันรับสมัคร (อ้างอิงประกาศ): 26 มกราคม ถึง 18 มีนาคม 2569
+                    - ปวช.: รับวุฒิ ม.3
+                    - ปวส.: รับวุฒิ ปวช. หรือ ม.6
+                    - ป.ตรี: วุฒิ ปวส. ไอทีหรือสาขาที่เกี่ยวข้อง, ระเบียนแสดงผลการเรียน (GPA)
+                    - ลิงก์สมัคร: https://admission.vec.go.th/web/student.htm?mode=register
+
+                    [รายชื่ออาจารย์และติดต่อสอบถาม]
+                    ${teacherList}
+                    - หากถามหาเบอร์ติดต่อ/สมัครเรียน ให้แจ้งเบอร์ ${directContact}
+
+                    [กฎเหล็กการตอบ]
+                    1. แทนตัวเองว่า "พี่บอท" และเรียกผู้ใช้ว่า "น้อง${firstName}" ทุกครั้ง
+                    2. ห้ามตอบว่า "ไม่มีข้อมูล" หรือ "ไม่ทราบ" ให้ใช้ข้อมูลที่ใกล้เคียงที่สุดจากประกาศล่าสุดมาตอบ
+                    3. หากผู้ใช้ถามถึงปีหน้า ให้ตรวจสอบจากประกาศล่าสุด [webNews] ที่ให้ไว้ข้างต้น`
                 },
                 { role: "user", content: text }
             ],
-            temperature: 0.3 // ลดความเพ้อเจ้อ เน้นความถูกต้องของข้อมูล
+            temperature: 0.3
         });
 
         const aiMsg = aiResponse.choices[0].message.content;
 
-        // 3. ✨ ส่ง QR Code เฉพาะเมื่อมีคำว่า "ออนไลน์" ในคำถาม (ตามที่สั่งไว้)
+        // 4. ✨ เงื่อนไขส่ง QR Code: ส่งเฉพาะเมื่อถามถึง "สมัคร" + "ออนไลน์"
         if (lower.includes("สมัคร") && lower.includes("ออนไลน์")) {
             const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=https://admission.vec.go.th/web/student.htm?mode=register";
             return client.replyMessage(event.replyToken, [
@@ -877,13 +889,11 @@ if (user.step === "done") {
             ]);
         }
 
-        // กรณีปกติส่งแค่ข้อความ
         return reply(event, aiMsg);
 
     } catch (e) {
         console.error("AI Error:", e);
-        const fallbackName = user.realName ? user.realName.split(" ")[0] : "น้อง";
-        return reply(event, `ขอโทษทีครับน้อง ${fallbackName} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะ!`);
+        return reply(event, `ขออภัยครับน้อง ${user.realName.split(" ")[0]} พี่บอทมึนหัวนิดหน่อย ลองถามใหม่อีกทีนะครับ!`);
     }
 }
 }
